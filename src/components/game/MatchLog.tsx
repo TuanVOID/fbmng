@@ -16,6 +16,8 @@ const getLogColor = (type: LogEntry['type']) => {
       return 'text-orange-400';
     case 'action':
       return 'text-blue-400';
+    case 'pass':
+      return 'text-cyan-400';
     default:
       return 'text-gray-300';
   }
