@@ -26,28 +26,28 @@ const generateId = () => Math.random().toString(36).slice(2, 9);
 // Tạo cặp hậu vệ-tiền đạo để kèm người
 type DefenderAssignment = Map<string, string>; // defenderId -> forwardId
 
+const initializeGame = (): GameState => {
+  const bluePlayers = createTeam('blue');
+  const redPlayers = createTeam('red');
+  
+  return {
+    phase: 'idle',
+    players: [...bluePlayers, ...redPlayers],
+    ball: { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2, ownerId: null },
+    score: { blue: 0, red: 0 },
+    matchLog: [],
+    selectedPlayerId: null,
+    isRunning: false,
+    matchTime: 0,
+    attackingTeam: 'blue',
+    phaseTimer: 0,
+    showGoalOverlay: false,
+  };
+};
+
 export const useGameLoop = () => {
   const [gameState, setGameState] = useState<GameState>(() => initializeGame());
   const defenderAssignmentsRef = useRef<DefenderAssignment>(new Map());
-
-  function initializeGame(): GameState {
-    const bluePlayers = createTeam('blue');
-    const redPlayers = createTeam('red');
-    
-    return {
-      phase: 'idle',
-      players: [...bluePlayers, ...redPlayers],
-      ball: { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2, ownerId: null },
-      score: { blue: 0, red: 0 },
-      matchLog: [],
-      selectedPlayerId: null,
-      isRunning: false,
-      matchTime: 0,
-      attackingTeam: 'blue',
-      phaseTimer: 0,
-      showGoalOverlay: false,
-    };
-  }
 
   // Tạo cặp bắt kèm cho hậu vệ
   const assignDefendersToForwards = (players: Player[]) => {
