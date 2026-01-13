@@ -225,6 +225,8 @@ export const useGameLoop = () => {
   };
 
   // Di chuyển hậu vệ: giữ đội hình + bám theo tiền đạo được gán
+  // Khi số tiền đạo nhiều hơn hậu vệ: hậu vệ gần nhất với người cầm bóng sẽ lao tới ngăn chặn
+  // Các hậu vệ còn lại bám theo các tiền đạo còn lại
   const getDefenderMovement = (
     defender: Player,
     ball: { x: number; y: number },
@@ -246,43 +248,122 @@ export const useGameLoop = () => {
       ? PITCH_WIDTH / 2 
       : 50 + defenderIndex * spacing;
 
-    // Tìm tiền đạo được gán kèm
-    const assignedForwardIds = defenderAssignmentsRef.current.get(defender.id) || [];
-    const assignedForwards = allPlayers.filter(p => assignedForwardIds.includes(p.id));
-
     let targetX = formationBaseX;
     let targetY = defender.baseY;
 
+    // Lấy tất cả tiền đạo đối phương
+    const opponentForwards = allPlayers.filter(p => p.team !== defender.team && p.role === 'FW');
+    const dfCount = numDefenders;
+    const fwCount = opponentForwards.length;
+
     // Nếu có tiền đạo đối phương CÓ bóng
     if (ballHolder && ballHolder.team !== defender.team && ballHolder.role === 'FW') {
-      // Nếu hậu vệ này được gán kèm người có bóng -> bám theo nhưng giữ vị trí tương đối
-      if (assignedForwardIds.includes(ballHolder.id)) {
-        const retreatY = isBlueTeam 
-          ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
-          : Math.min(penaltyLineY + 30, 180);
+      // Xử lý đặc biệt khi số tiền đạo nhiều hơn hậu vệ
+      if (fwCount > dfCount) {
+        // Tìm hậu vệ gần người cầm bóng nhất
+        let nearestDefender: Player | null = null;
+        let nearestDist = Infinity;
+        for (const df of allDefenders) {
+          const dist = distance(df.x, df.y, ballHolder.x, ballHolder.y);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestDefender = df;
+          }
+        }
+
+        if (defender.id === nearestDefender?.id) {
+          // Hậu vệ này gần nhất -> lao tới ngăn chặn người cầm bóng
+          const retreatY = isBlueTeam 
+            ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
+            : Math.min(penaltyLineY + 30, 180);
+          
+          const blendFactor = 0.7; // 70% theo bóng, 30% giữ đội hình
+          targetX = formationBaseX * (1 - blendFactor) + clamp(ballHolder.x, 60, PITCH_WIDTH - 60) * blendFactor;
+          targetY = retreatY;
+        } else {
+          // Hậu vệ còn lại -> bám theo các tiền đạo KHÁC (không phải người cầm bóng)
+          const otherForwards = opponentForwards.filter(fw => fw.id !== ballHolder.id);
+          
+          // Tìm vị trí của hậu vệ này trong danh sách hậu vệ còn lại (không tính người kèm ball holder)
+          const remainingDefenders = allDefenders.filter(df => df.id !== nearestDefender?.id);
+          const myIndexInRemaining = remainingDefenders.findIndex(df => df.id === defender.id);
+          
+          if (otherForwards.length > 0 && myIndexInRemaining >= 0) {
+            // Gán tiền đạo theo thứ tự
+            const assignedForward = otherForwards[myIndexInRemaining % otherForwards.length];
+            
+            // Tính vị trí đội hình riêng cho hậu vệ còn lại
+            const remainingSpacing = (PITCH_WIDTH - 100) / Math.max(remainingDefenders.length - 1, 1);
+            const remainingBaseX = remainingDefenders.length === 1 
+              ? PITCH_WIDTH / 2 
+              : 50 + myIndexInRemaining * remainingSpacing;
+            
+            const blendFactor = 0.5; // 50% theo tiền đạo, 50% giữ đội hình
+            targetX = remainingBaseX * (1 - blendFactor) + clamp(assignedForward.x, 60, PITCH_WIDTH - 60) * blendFactor;
+            targetY = isBlueTeam 
+              ? Math.max(assignedForward.y + 30, penaltyLineY)
+              : Math.min(assignedForward.y - 30, penaltyLineY);
+          }
+        }
+      } else {
+        // Số hậu vệ >= số tiền đạo: dùng logic gán cố định
+        const assignedForwardIds = defenderAssignmentsRef.current.get(defender.id) || [];
         
-        // Blend giữa vị trí người có bóng và vị trí đội hình
-        const blendFactor = 0.6; // 60% theo bóng, 40% giữ đội hình
-        targetX = formationBaseX * (1 - blendFactor) + clamp(ballHolder.x, 60, PITCH_WIDTH - 60) * blendFactor;
-        targetY = retreatY;
-      } else if (assignedForwards.length > 0) {
-        // Hậu vệ khác vẫn kèm tiền đạo được gán của mình nhưng giữ vị trí X theo đội hình
-        const primaryTarget = assignedForwards[0];
-        const blendFactor = 0.4; // 40% theo tiền đạo, 60% giữ đội hình
-        targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
-        targetY = isBlueTeam 
-          ? Math.max(primaryTarget.y + 30, penaltyLineY)
-          : Math.min(primaryTarget.y - 30, penaltyLineY);
+        // Nếu hậu vệ này được gán kèm người có bóng -> bám theo nhưng giữ vị trí tương đối
+        if (assignedForwardIds.includes(ballHolder.id)) {
+          const retreatY = isBlueTeam 
+            ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
+            : Math.min(penaltyLineY + 30, 180);
+          
+          // Blend giữa vị trí người có bóng và vị trí đội hình
+          const blendFactor = 0.6; // 60% theo bóng, 40% giữ đội hình
+          targetX = formationBaseX * (1 - blendFactor) + clamp(ballHolder.x, 60, PITCH_WIDTH - 60) * blendFactor;
+          targetY = retreatY;
+        } else {
+          // Hậu vệ khác vẫn kèm tiền đạo được gán của mình nhưng giữ vị trí X theo đội hình
+          const assignedForwards = allPlayers.filter(p => assignedForwardIds.includes(p.id));
+          if (assignedForwards.length > 0) {
+            const primaryTarget = assignedForwards[0];
+            const blendFactor = 0.4; // 40% theo tiền đạo, 60% giữ đội hình
+            targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
+            targetY = isBlueTeam 
+              ? Math.max(primaryTarget.y + 30, penaltyLineY)
+              : Math.min(primaryTarget.y - 30, penaltyLineY);
+          }
+        }
       }
-    } else if (assignedForwards.length > 0) {
+    } else {
       // Tiền đạo đối phương KHÔNG cầm bóng -> bám nhẹ theo tiền đạo nhưng giữ đội hình
-      const primaryTarget = assignedForwards[0];
-      const blockY = (primaryTarget.y + ownGoalY) / 2;
+      const assignedForwardIds = defenderAssignmentsRef.current.get(defender.id) || [];
+      const assignedForwards = allPlayers.filter(p => assignedForwardIds.includes(p.id));
       
-      // Blend nhẹ hơn khi không có bóng (30% theo tiền đạo, 70% giữ đội hình)
-      const blendFactor = 0.3;
-      targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
-      targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
+      if (assignedForwards.length > 0) {
+        const primaryTarget = assignedForwards[0];
+        const blockY = (primaryTarget.y + ownGoalY) / 2;
+        
+        // Blend nhẹ hơn khi không có bóng (30% theo tiền đạo, 70% giữ đội hình)
+        const blendFactor = 0.3;
+        targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
+        targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
+      } else if (fwCount > dfCount) {
+        // Khi không có gán cố định và tiền đạo nhiều hơn, bám theo tiền đạo gần nhất
+        let nearestFW: Player | null = null;
+        let nearestDist = Infinity;
+        for (const fw of opponentForwards) {
+          const dist = distance(defender.x, defender.y, fw.x, fw.y);
+          if (dist < nearestDist) {
+            nearestDist = dist;
+            nearestFW = fw;
+          }
+        }
+        
+        if (nearestFW) {
+          const blockY = (nearestFW.y + ownGoalY) / 2;
+          const blendFactor = 0.3;
+          targetX = formationBaseX * (1 - blendFactor) + clamp(nearestFW.x, 60, PITCH_WIDTH - 60) * blendFactor;
+          targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
+        }
+      }
     }
 
     // Đảm bảo khoảng cách tối thiểu với hậu vệ khác
