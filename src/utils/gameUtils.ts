@@ -52,10 +52,31 @@ export const createPlayer = (
   };
 };
 
-export const createTeam = (team: Team): Player[] => {
+export type Formation = '2-4' | '3-3' | '4-2';
+
+export const getFormationCounts = (formation: Formation): { defenders: number; forwards: number } => {
+  switch (formation) {
+    case '2-4': return { defenders: 2, forwards: 4 };
+    case '3-3': return { defenders: 3, forwards: 3 };
+    case '4-2': return { defenders: 4, forwards: 2 };
+    default: return { defenders: 3, forwards: 3 };
+  }
+};
+
+const getPositionsForCount = (count: number): number[] => {
+  switch (count) {
+    case 2: return [130, 270];
+    case 3: return [100, 200, 300];
+    case 4: return [70, 150, 250, 330];
+    default: return [100, 200, 300];
+  }
+};
+
+export const createTeam = (team: Team, formation: Formation = '3-3'): Player[] => {
   const usedNames: string[] = [];
   const players: Player[] = [];
   const isBlue = team === 'blue';
+  const { defenders, forwards } = getFormationCounts(formation);
   
   // Positions relative to pitch (blue at bottom, red at top)
   const gkY = isBlue ? PITCH_HEIGHT - 50 : 50;
@@ -67,17 +88,24 @@ export const createTeam = (team: Team): Player[] => {
   usedNames.push(gk.name);
   players.push(gk);
 
-  // 3 Defenders
-  const defPositions = [100, 200, 300];
+  // Defenders
+  const defPositions = getPositionsForCount(defenders);
   defPositions.forEach((x, i) => {
     const df = createPlayer(`${team}-df-${i}`, 'DF', team, x, defY, usedNames);
     usedNames.push(df.name);
     players.push(df);
   });
 
-  // 3 Forwards
-  const fwPositions = [100, 200, 300];
-  fwPositions.forEach((x, i) => {
+  // Forwards - fw-1 luôn ở giữa (để tranh chấp kickoff)
+  const fwPositions = getPositionsForCount(forwards);
+  // Đảm bảo vị trí giữa (200) là fw-1 cho kickoff
+  const sortedFwPositions = [...fwPositions].sort((a, b) => {
+    const aDist = Math.abs(a - 200);
+    const bDist = Math.abs(b - 200);
+    return aDist - bDist;
+  });
+  
+  sortedFwPositions.forEach((x, i) => {
     const fw = createPlayer(`${team}-fw-${i}`, 'FW', team, x, fwY, usedNames);
     usedNames.push(fw.name);
     players.push(fw);

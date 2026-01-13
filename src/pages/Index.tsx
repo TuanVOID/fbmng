@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Play } from 'lucide-react';
+import { Play, Square } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useGameLoop } from '@/hooks/useGameLoop';
 import { Pitch } from '@/components/game/Pitch';
@@ -7,9 +7,10 @@ import { MatchLog } from '@/components/game/MatchLog';
 import { PlayerStats } from '@/components/game/PlayerStats';
 import { Scoreboard } from '@/components/game/Scoreboard';
 import { GoalOverlay } from '@/components/game/GoalOverlay';
+import { FormationSelector } from '@/components/game/FormationSelector';
 
 const Index = () => {
-  const { gameState, startMatch, selectPlayer } = useGameLoop();
+  const { gameState, startMatch, stopMatch, selectPlayer, selectedFormation, setSelectedFormation } = useGameLoop();
   
   const selectedPlayer = gameState.players.find(p => p.id === gameState.selectedPlayerId);
 
@@ -43,14 +44,21 @@ const Index = () => {
           />
         </motion.div>
 
-        {/* Start Button */}
-        {!gameState.isRunning && (
-          <motion.div
-            className="flex justify-center mb-6"
-            initial={{ scale: 0.9, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ delay: 0.2 }}
-          >
+        {/* Formation Selector + Buttons */}
+        <motion.div
+          className="flex justify-center items-center gap-4 mb-6"
+          initial={{ scale: 0.9, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ delay: 0.2 }}
+        >
+          {!gameState.isRunning && (
+            <FormationSelector
+              selectedFormation={selectedFormation}
+              onSelectFormation={setSelectedFormation}
+            />
+          )}
+          
+          {!gameState.isRunning ? (
             <Button
               size="lg"
               className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-green-500/30"
@@ -59,8 +67,18 @@ const Index = () => {
               <Play className="w-6 h-6 mr-2" />
               Start Match
             </Button>
-          </motion.div>
-        )}
+          ) : (
+            <Button
+              size="lg"
+              variant="destructive"
+              className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-red-500/30"
+              onClick={stopMatch}
+            >
+              <Square className="w-6 h-6 mr-2" />
+              Stop Match
+            </Button>
+          )}
+        </motion.div>
 
         {/* Main Game Area */}
         <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_280px] gap-4">
