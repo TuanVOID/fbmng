@@ -10,6 +10,7 @@ interface PlayerDotProps {
 export const PlayerDot = ({ player, isSelected, onClick }: PlayerDotProps) => {
   const teamColor = player.team === 'blue' ? 'rgb(59, 130, 246)' : 'rgb(239, 68, 68)';
   const glowColor = player.team === 'blue' ? 'rgba(59, 130, 246, 0.6)' : 'rgba(239, 68, 68, 0.6)';
+  const dashColor = player.team === 'blue' ? 'rgba(59, 130, 246, 0.8)' : 'rgba(239, 68, 68, 0.8)';
   
   return (
     <motion.div
@@ -24,11 +25,41 @@ export const PlayerDot = ({ player, isSelected, onClick }: PlayerDotProps) => {
       }}
       transition={{
         type: 'spring',
-        stiffness: 300,
-        damping: 30,
+        stiffness: player.isDashing ? 100 : 300,
+        damping: player.isDashing ? 15 : 30,
       }}
       onClick={onClick}
     >
+      {/* Dash effect - trail lines */}
+      <AnimatePresence>
+        {player.isDashing && (
+          <>
+            <motion.div
+              className="absolute left-1/2 top-1/2 -translate-x-1/2"
+              initial={{ opacity: 1, scaleY: 0 }}
+              animate={{ opacity: 0, scaleY: 3 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              style={{
+                width: 4,
+                height: 30,
+                background: `linear-gradient(to bottom, transparent, ${dashColor})`,
+                transformOrigin: 'center top',
+              }}
+            />
+            <motion.div
+              className="absolute -inset-6 rounded-full"
+              initial={{ scale: 0.5, opacity: 1 }}
+              animate={{ scale: 2, opacity: 0 }}
+              transition={{ duration: 0.4 }}
+              style={{
+                background: `radial-gradient(circle, ${dashColor} 0%, transparent 70%)`,
+              }}
+            />
+          </>
+        )}
+      </AnimatePresence>
+
       {/* Skill activation effect */}
       <AnimatePresence>
         {player.isSkillActive && (
@@ -52,8 +83,12 @@ export const PlayerDot = ({ player, isSelected, onClick }: PlayerDotProps) => {
         }`}
         style={{
           background: teamColor,
-          boxShadow: `0 0 15px ${glowColor}, 0 0 30px ${glowColor}`,
+          boxShadow: player.isDashing 
+            ? `0 0 25px ${dashColor}, 0 0 50px ${dashColor}` 
+            : `0 0 15px ${glowColor}, 0 0 30px ${glowColor}`,
         }}
+        animate={player.isDashing ? { scale: [1, 1.3, 1] } : {}}
+        transition={{ duration: 0.2 }}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.95 }}
       >

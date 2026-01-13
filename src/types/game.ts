@@ -1,6 +1,17 @@
 export type PlayerRole = 'GK' | 'DF' | 'FW';
 export type Team = 'blue' | 'red';
-export type GamePhase = 'idle' | 'kickoff' | 'buildup' | 'confrontation' | 'finishing' | 'goal' | 'reset';
+export type GamePhase = 
+  | 'idle' 
+  | 'gk_has_ball'          // GK cầm bóng, chờ cầu thủ về vị trí
+  | 'df_buildup'           // Hậu vệ cầm bóng, đẩy lên
+  | 'df_passing'           // Hậu vệ đang chuyền cho tiền đạo
+  | 'fw_attacking'         // Tiền đạo cầm bóng, tấn công
+  | 'duel'                 // Va chạm giữa tiền đạo và hậu vệ
+  | 'fw_breakthrough'      // Tiền đạo vượt qua hậu vệ
+  | 'shooting'             // Tiền đạo sút bóng
+  | 'goal'                 // Ghi bàn
+  | 'save'                 // Thủ môn cản phá
+  | 'reset';               // Reset về vị trí
 
 export interface PlayerStats {
   atk: number;
@@ -27,12 +38,13 @@ export interface Player {
   hasBall: boolean;
   skill: Skill;
   isSkillActive: boolean;
+  isDashing?: boolean;
 }
 
 export interface Skill {
   name: string;
   emoji: string;
-  type: 'attack' | 'defense';
+  type: 'attack' | 'defense' | 'gk';
   effect: string;
 }
 
@@ -40,6 +52,9 @@ export interface Ball {
   x: number;
   y: number;
   ownerId: string | null;
+  isMoving?: boolean;
+  targetX?: number;
+  targetY?: number;
 }
 
 export interface GameState {
@@ -51,11 +66,13 @@ export interface GameState {
   selectedPlayerId: string | null;
   isRunning: boolean;
   matchTime: number;
+  attackingTeam: Team;
+  phaseTimer: number;
 }
 
 export interface LogEntry {
   id: string;
   time: number;
   message: string;
-  type: 'info' | 'action' | 'goal' | 'skill' | 'duel';
+  type: 'info' | 'action' | 'goal' | 'skill' | 'duel' | 'pass';
 }
