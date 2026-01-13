@@ -2,16 +2,16 @@ export type PlayerRole = 'GK' | 'DF' | 'FW';
 export type Team = 'blue' | 'red';
 export type GamePhase = 
   | 'idle' 
-  | 'gk_has_ball'          // GK cầm bóng, chờ cầu thủ về vị trí
-  | 'df_buildup'           // Hậu vệ cầm bóng, đẩy lên
+  | 'kickoff_contest'       // Tranh chấp bóng giữa sân
+  | 'df_buildup'           // Hậu vệ cầm bóng, đẩy lên hoặc chuyền ngang
   | 'df_passing'           // Hậu vệ đang chuyền cho tiền đạo
   | 'fw_attacking'         // Tiền đạo cầm bóng, tấn công
   | 'duel'                 // Va chạm giữa tiền đạo và hậu vệ
   | 'fw_breakthrough'      // Tiền đạo vượt qua hậu vệ
   | 'shooting'             // Tiền đạo sút bóng
-  | 'goal'                 // Ghi bàn
+  | 'goal_celebration'     // Hiển thị bảng điểm lớn sau khi ghi bàn
   | 'save'                 // Thủ môn cản phá
-  | 'reset';               // Reset về vị trí
+  | 'reset_to_center';     // Reset về giữa sân sau khi ghi bàn
 
 export interface PlayerStats {
   atk: number;
@@ -55,6 +55,7 @@ export interface Ball {
   isMoving?: boolean;
   targetX?: number;
   targetY?: number;
+  isInGoal?: boolean;
 }
 
 export interface GameState {
@@ -68,6 +69,8 @@ export interface GameState {
   matchTime: number;
   attackingTeam: Team;
   phaseTimer: number;
+  showGoalOverlay?: boolean;
+  lastScoringTeam?: Team;
 }
 
 export interface LogEntry {
