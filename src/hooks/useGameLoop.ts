@@ -224,74 +224,82 @@ export const useGameLoop = () => {
     };
   };
 
-  // Di chuyển hậu vệ: bám theo tiền đạo được gán (có thể nhiều người kèm 1)
+  // Di chuyển hậu vệ: giữ đội hình + bám theo tiền đạo được gán
   const getDefenderMovement = (
     defender: Player,
     ball: { x: number; y: number },
     ballHolder: Player | undefined,
     allPlayers: Player[],
-    allDefenders: Player[]
+    allDefenders: Player[],
+    defenderIndex: number
   ): { x: number; y: number } => {
     const isBlueTeam = defender.team === 'blue';
     const ownGoalY = isBlueTeam ? PITCH_HEIGHT - 30 : 30;
     const penaltyLineY = isBlueTeam ? PENALTY_AREA_Y_RED : PENALTY_AREA_Y_BLUE;
+    
+    // Tính vị trí cơ bản theo đội hình (dựa trên baseX, baseY)
+    const numDefenders = allDefenders.length;
+    
+    // Tính offset X để giữ khoảng cách đều giữa các hậu vệ
+    const spacing = (PITCH_WIDTH - 100) / Math.max(numDefenders - 1, 1);
+    const formationBaseX = numDefenders === 1 
+      ? PITCH_WIDTH / 2 
+      : 50 + defenderIndex * spacing;
 
     // Tìm tiền đạo được gán kèm
     const assignedForwardIds = defenderAssignmentsRef.current.get(defender.id) || [];
     const assignedForwards = allPlayers.filter(p => assignedForwardIds.includes(p.id));
 
+    let targetX = formationBaseX;
+    let targetY = defender.baseY;
+
     // Nếu có tiền đạo đối phương CÓ bóng
     if (ballHolder && ballHolder.team !== defender.team && ballHolder.role === 'FW') {
-      // Nếu hậu vệ này được gán kèm người có bóng -> bám theo
+      // Nếu hậu vệ này được gán kèm người có bóng -> bám theo nhưng giữ vị trí tương đối
       if (assignedForwardIds.includes(ballHolder.id)) {
         const retreatY = isBlueTeam 
           ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
           : Math.min(penaltyLineY + 30, 180);
         
-        const blockX = clamp(ballHolder.x, 80, PITCH_WIDTH - 80);
-        
-        return { x: blockX, y: retreatY };
-      }
-      
-      // Hậu vệ khác vẫn kèm tiền đạo được gán của mình
-      if (assignedForwards.length > 0) {
+        // Blend giữa vị trí người có bóng và vị trí đội hình
+        const blendFactor = 0.6; // 60% theo bóng, 40% giữ đội hình
+        targetX = formationBaseX * (1 - blendFactor) + clamp(ballHolder.x, 60, PITCH_WIDTH - 60) * blendFactor;
+        targetY = retreatY;
+      } else if (assignedForwards.length > 0) {
+        // Hậu vệ khác vẫn kèm tiền đạo được gán của mình nhưng giữ vị trí X theo đội hình
         const primaryTarget = assignedForwards[0];
-        const targetY = isBlueTeam 
+        const blendFactor = 0.4; // 40% theo tiền đạo, 60% giữ đội hình
+        targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
+        targetY = isBlueTeam 
           ? Math.max(primaryTarget.y + 30, penaltyLineY)
           : Math.min(primaryTarget.y - 30, penaltyLineY);
-        
-        return {
-          x: clamp(primaryTarget.x, 60, PITCH_WIDTH - 60),
-          y: targetY,
-        };
       }
-    }
-
-    // Nếu tiền đạo đối phương KHÔNG cầm bóng -> bám theo tiền đạo được gán
-    if (assignedForwards.length > 0) {
+    } else if (assignedForwards.length > 0) {
+      // Tiền đạo đối phương KHÔNG cầm bóng -> bám nhẹ theo tiền đạo nhưng giữ đội hình
       const primaryTarget = assignedForwards[0];
       const blockY = (primaryTarget.y + ownGoalY) / 2;
-      let targetX = clamp(primaryTarget.x, 50, PITCH_WIDTH - 50);
-      let targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
-
-      // Tránh chồng lên hậu vệ khác
-      for (const otherDF of allDefenders) {
-        if (otherDF.id === defender.id) continue;
-        const dist = distance(targetX, targetY, otherDF.x, otherDF.y);
-        if (dist < MIN_DEFENDER_DISTANCE) {
-          const dx = targetX - otherDF.x;
-          const dy = targetY - otherDF.y;
-          const pushDist = MIN_DEFENDER_DISTANCE - dist;
-          const angle = Math.atan2(dy, dx);
-          targetX = clamp(targetX + Math.cos(angle) * pushDist * 0.5, 50, PITCH_WIDTH - 50);
-          targetY = clamp(targetY + Math.sin(angle) * pushDist * 0.5, 50, PITCH_HEIGHT - 50);
-        }
-      }
-
-      return { x: targetX, y: targetY };
+      
+      // Blend nhẹ hơn khi không có bóng (30% theo tiền đạo, 70% giữ đội hình)
+      const blendFactor = 0.3;
+      targetX = formationBaseX * (1 - blendFactor) + clamp(primaryTarget.x, 60, PITCH_WIDTH - 60) * blendFactor;
+      targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
     }
 
-    return getIdleMovementTarget(defender, ball);
+    // Đảm bảo khoảng cách tối thiểu với hậu vệ khác
+    for (const otherDF of allDefenders) {
+      if (otherDF.id === defender.id) continue;
+      const dist = distance(targetX, targetY, otherDF.x, otherDF.y);
+      if (dist < MIN_DEFENDER_DISTANCE) {
+        // Đẩy ra xa dựa trên vị trí trong đội hình
+        const pushDirection = defenderIndex < allDefenders.findIndex(d => d.id === otherDF.id) ? -1 : 1;
+        targetX = clamp(targetX + pushDirection * (MIN_DEFENDER_DISTANCE - dist), 40, PITCH_WIDTH - 40);
+      }
+    }
+
+    return { 
+      x: clamp(targetX, 40, PITCH_WIDTH - 40), 
+      y: clamp(targetY, 40, PITCH_HEIGHT - 40) 
+    };
   };
 
   // Di chuyển tiền đạo
@@ -481,7 +489,8 @@ export const useGameLoop = () => {
               targetPos = getForwardMovement(p, ball, ballHolder, attackingTeam);
             } else {
               const sameTeamDFs = p.team === ballHolder.team ? myTeamDefenders : opponentTeamDefenders;
-              targetPos = getDefenderMovement(p, ball, ballHolder, players, sameTeamDFs);
+              const dfIndex = sameTeamDFs.findIndex(d => d.id === p.id);
+              targetPos = getDefenderMovement(p, ball, ballHolder, players, sameTeamDFs, dfIndex);
             }
             
             const moveSpeed = BASE_SPEED + p.stats.spd / 100;
@@ -602,7 +611,8 @@ export const useGameLoop = () => {
               }
             } else {
               if (p.role === 'DF') {
-                const targetPos = getDefenderMovement(p, ball, ballHolder, players, opponentTeamDefenders);
+                const dfIndex = opponentTeamDefenders.findIndex(d => d.id === p.id);
+                const targetPos = getDefenderMovement(p, ball, ballHolder, players, opponentTeamDefenders, dfIndex);
                 const moveSpeed = BASE_SPEED + p.stats.spd / 80;
                 const newPlayerPos = moveTowards({ x: p.x, y: p.y }, targetPos, moveSpeed);
                 return { ...p, x: newPlayerPos.x, y: newPlayerPos.y };
