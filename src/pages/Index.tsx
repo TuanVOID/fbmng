@@ -1,11 +1,12 @@
 import { motion } from 'framer-motion';
-import { Play, RotateCcw } from 'lucide-react';
+import { Play } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useGameLoop } from '@/hooks/useGameLoop';
 import { Pitch } from '@/components/game/Pitch';
 import { MatchLog } from '@/components/game/MatchLog';
 import { PlayerStats } from '@/components/game/PlayerStats';
 import { Scoreboard } from '@/components/game/Scoreboard';
+import { GoalOverlay } from '@/components/game/GoalOverlay';
 
 const Index = () => {
   const { gameState, startMatch, selectPlayer } = useGameLoop();
@@ -75,7 +76,7 @@ const Index = () => {
 
           {/* Center - Pitch */}
           <motion.div
-            className="flex justify-center"
+            className="flex justify-center relative"
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             transition={{ delay: 0.4 }}
@@ -85,6 +86,12 @@ const Index = () => {
               ball={gameState.ball}
               selectedPlayerId={gameState.selectedPlayerId}
               onSelectPlayer={selectPlayer}
+            />
+            <GoalOverlay
+              show={gameState.showGoalOverlay || false}
+              blueScore={gameState.score.blue}
+              redScore={gameState.score.red}
+              scoringTeam={gameState.lastScoringTeam}
             />
           </motion.div>
 
