@@ -10,7 +10,16 @@ import { GoalOverlay } from '@/components/game/GoalOverlay';
 import { FormationSelector } from '@/components/game/FormationSelector';
 
 const Index = () => {
-  const { gameState, startMatch, stopMatch, selectPlayer, selectedFormation, setSelectedFormation } = useGameLoop();
+  const { 
+    gameState, 
+    startMatch, 
+    stopMatch, 
+    selectPlayer, 
+    blueFormation, 
+    setBlueFormation,
+    redFormation,
+    setRedFormation,
+  } = useGameLoop();
   
   const selectedPlayer = gameState.players.find(p => p.id === gameState.selectedPlayerId);
 
@@ -46,38 +55,42 @@ const Index = () => {
 
         {/* Formation Selector + Buttons */}
         <motion.div
-          className="flex justify-center items-center gap-4 mb-6"
+          className="flex flex-col items-center gap-4 mb-6"
           initial={{ scale: 0.9, opacity: 0 }}
           animate={{ scale: 1, opacity: 1 }}
           transition={{ delay: 0.2 }}
         >
           {!gameState.isRunning && (
             <FormationSelector
-              selectedFormation={selectedFormation}
-              onSelectFormation={setSelectedFormation}
+              blueFormation={blueFormation}
+              redFormation={redFormation}
+              onSelectBlueFormation={setBlueFormation}
+              onSelectRedFormation={setRedFormation}
             />
           )}
           
-          {!gameState.isRunning ? (
-            <Button
-              size="lg"
-              className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-green-500/30"
-              onClick={startMatch}
-            >
-              <Play className="w-6 h-6 mr-2" />
-              Start Match
-            </Button>
-          ) : (
-            <Button
-              size="lg"
-              variant="destructive"
-              className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-red-500/30"
-              onClick={stopMatch}
-            >
-              <Square className="w-6 h-6 mr-2" />
-              Stop Match
-            </Button>
-          )}
+          <div className="flex gap-3">
+            {!gameState.isRunning ? (
+              <Button
+                size="lg"
+                className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-green-500/30"
+                onClick={startMatch}
+              >
+                <Play className="w-6 h-6 mr-2" />
+                Start Match
+              </Button>
+            ) : (
+              <Button
+                size="lg"
+                variant="destructive"
+                className="bg-gradient-to-r from-red-500 to-rose-600 hover:from-red-600 hover:to-rose-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-red-500/30"
+                onClick={stopMatch}
+              >
+                <Square className="w-6 h-6 mr-2" />
+                Stop Match
+              </Button>
+            )}
+          </div>
         </motion.div>
 
         {/* Main Game Area */}

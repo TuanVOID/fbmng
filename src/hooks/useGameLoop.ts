@@ -21,12 +21,21 @@ const BASE_SPEED = 1.5;
 const FAST_SPEED = 2.5;
 const DASH_SPEED = 8;
 const MIN_DEFENDER_DISTANCE = 60;
-const DEFENDER_TACKLE_CHANCE = 0.6; // 60% cơ hội cướp bóng
+
+// Tỉ lệ cướp bóng theo số lượng
+const BASE_TACKLE_CHANCE = 0.5; // 50% cơ bản 1v1
+const TACKLE_BONUS_PER_EXTRA_DF = 0.13; // +13% mỗi hậu vệ thừa
+const BASE_BREAKTHROUGH_CHANCE = 0.5; // 50% cơ bản 1v1
+const BREAKTHROUGH_BONUS_PER_EXTRA_FW = 0.10; // +10% mỗi tiền đạo thừa
+
+// Tỉ lệ chuyền bóng và bonus ghi bàn
+const FORWARD_PASS_CHANCE = 0.8; // 80% chuyền thành công
+const GOAL_BONUS_AFTER_PASS = 0.05; // +5% ghi bàn sau khi chuyền
 
 const generateId = () => Math.random().toString(36).slice(2, 9);
 
-// Tạo cặp hậu vệ-tiền đạo để kèm người
-type DefenderAssignment = Map<string, string>; // defenderId -> forwardId
+// Cặp hậu vệ-tiền đạo để kèm người
+type DefenderAssignment = Map<string, string[]>; // defenderId -> [forwardIds]
 
 const initializeGame = (): GameState => {
   const bluePlayers = createTeam('blue');
@@ -49,41 +58,84 @@ const initializeGame = (): GameState => {
 
 export const useGameLoop = () => {
   const [gameState, setGameState] = useState<GameState>(() => initializeGame());
-  const [selectedFormation, setSelectedFormation] = useState<Formation>('3-3');
+  const [blueFormation, setBlueFormation] = useState<Formation>('3-3');
+  const [redFormation, setRedFormation] = useState<Formation>('3-3');
   const defenderAssignmentsRef = useRef<DefenderAssignment>(new Map());
+  const goalBonusRef = useRef<number>(0); // Bonus ghi bàn từ chuyền bóng
 
-  // Tạo cặp bắt kèm cho hậu vệ
+  // Tạo cặp bắt kèm cân đối cho hậu vệ
   const assignDefendersToForwards = (players: Player[]) => {
-    const assignments = new Map<string, string>();
+    const assignments = new Map<string, string[]>();
     
     const blueDefenders = players.filter(p => p.team === 'blue' && p.role === 'DF');
     const redDefenders = players.filter(p => p.team === 'red' && p.role === 'DF');
     const blueForwards = players.filter(p => p.team === 'blue' && p.role === 'FW');
     const redForwards = players.filter(p => p.team === 'red' && p.role === 'FW');
 
-    // Blue defenders kèm red forwards
-    blueDefenders.forEach((df, i) => {
-      if (redForwards[i]) {
-        assignments.set(df.id, redForwards[i].id);
-      }
-    });
+    // Hàm phân bổ hậu vệ cho tiền đạo
+    const assignTeamDefenders = (defenders: Player[], forwards: Player[]) => {
+      if (defenders.length === 0 || forwards.length === 0) return;
 
-    // Red defenders kèm blue forwards
-    redDefenders.forEach((df, i) => {
-      if (blueForwards[i]) {
-        assignments.set(df.id, blueForwards[i].id);
+      const dfCount = defenders.length;
+      const fwCount = forwards.length;
+
+      if (dfCount === fwCount) {
+        // 1 kèm 1
+        defenders.forEach((df, i) => {
+          assignments.set(df.id, [forwards[i].id]);
+        });
+      } else if (dfCount > fwCount) {
+        // Nhiều hậu vệ hơn tiền đạo: chia đều hậu vệ cho các tiền đạo
+        const dfPerFw = Math.floor(dfCount / fwCount);
+        const remainder = dfCount % fwCount;
+        let dfIndex = 0;
+        
+        forwards.forEach((fw, fwIdx) => {
+          const numDfs = dfPerFw + (fwIdx < remainder ? 1 : 0);
+          for (let i = 0; i < numDfs && dfIndex < dfCount; i++) {
+            const currentAssignment = assignments.get(defenders[dfIndex].id) || [];
+            assignments.set(defenders[dfIndex].id, [...currentAssignment, fw.id]);
+            dfIndex++;
+          }
+        });
+      } else {
+        // Nhiều tiền đạo hơn hậu vệ: mỗi hậu vệ kèm 1-2 tiền đạo
+        // Ưu tiên kèm người có bóng (xử lý động trong game loop)
+        defenders.forEach((df, i) => {
+          // Mỗi hậu vệ kèm 1 tiền đạo cố định
+          const primaryFw = forwards[i % fwCount];
+          assignments.set(df.id, [primaryFw.id]);
+        });
       }
-    });
+    };
+
+    // Blue defenders kèm red forwards
+    assignTeamDefenders(blueDefenders, redForwards);
+    // Red defenders kèm blue forwards  
+    assignTeamDefenders(redDefenders, blueForwards);
 
     defenderAssignmentsRef.current = assignments;
   };
 
+  // Tính tỉ lệ cướp bóng dựa trên số lượng người
+  const calculateTackleChance = (defendingDFs: number, attackingFWs: number): number => {
+    const difference = defendingDFs - attackingFWs;
+    if (difference > 0) {
+      // Nhiều hậu vệ hơn: tăng tỉ lệ cướp
+      return Math.min(0.85, BASE_TACKLE_CHANCE + (difference * TACKLE_BONUS_PER_EXTRA_DF));
+    } else if (difference < 0) {
+      // Nhiều tiền đạo hơn: giảm tỉ lệ cướp (tăng tỉ lệ vượt qua)
+      return Math.max(0.25, BASE_TACKLE_CHANCE - (Math.abs(difference) * BREAKTHROUGH_BONUS_PER_EXTRA_FW));
+    }
+    return BASE_TACKLE_CHANCE;
+  };
+
   const startMatch = useCallback(() => {
-    const bluePlayers = createTeam('blue', selectedFormation);
-    const redPlayers = createTeam('red', selectedFormation);
+    const bluePlayers = createTeam('blue', blueFormation);
+    const redPlayers = createTeam('red', redFormation);
     const allPlayers = [...bluePlayers, ...redPlayers];
 
-    // Đặt 1 FW mỗi bên ở giữa sân để tranh chấp (fw-0 vì đã sort theo vị trí giữa)
+    // Đặt 1 FW mỗi bên ở giữa sân để tranh chấp
     const blueKickoffFW = allPlayers.find(p => p.team === 'blue' && p.role === 'FW' && p.id.includes('fw-0'));
     const redKickoffFW = allPlayers.find(p => p.team === 'red' && p.role === 'FW' && p.id.includes('fw-0'));
     
@@ -98,6 +150,7 @@ export const useGameLoop = () => {
 
     // Tạo cặp bắt kèm
     assignDefendersToForwards(allPlayers);
+    goalBonusRef.current = 0;
 
     setGameState({
       phase: 'kickoff_contest',
@@ -116,7 +169,7 @@ export const useGameLoop = () => {
       phaseTimer: 0,
       showGoalOverlay: false,
     });
-  }, [selectedFormation]);
+  }, [blueFormation, redFormation]);
 
   const stopMatch = useCallback(() => {
     setGameState(prev => ({
@@ -140,11 +193,11 @@ export const useGameLoop = () => {
     return attackerRoll > defenderRoll ? 'attacker' : 'defender';
   };
 
-  const attemptShot = (shooter: Player, goalkeeper: Player): boolean => {
+  const attemptShot = (shooter: Player, goalkeeper: Player, bonusChance: number = 0): boolean => {
     const shooterPower = shooter.stats.atk + (shooter.isSkillActive && shooter.skill.type === 'attack' ? 50 : 0);
     const gkPower = goalkeeper.stats.def + (goalkeeper.isSkillActive ? 50 : 0);
     
-    const shooterRoll = shooterPower + Math.random() * 50;
+    const shooterRoll = shooterPower + Math.random() * 50 + (bonusChance * 100);
     const gkRoll = gkPower + Math.random() * 30;
     
     return shooterRoll > gkRoll;
@@ -171,57 +224,54 @@ export const useGameLoop = () => {
     };
   };
 
-  // Di chuyển hậu vệ: bám theo tiền đạo được gán
+  // Di chuyển hậu vệ: bám theo tiền đạo được gán (có thể nhiều người kèm 1)
   const getDefenderMovement = (
     defender: Player,
     ball: { x: number; y: number },
     ballHolder: Player | undefined,
     allPlayers: Player[],
-    allDefenders: Player[] // Danh sách tất cả hậu vệ cùng đội để tránh chồng lên nhau
+    allDefenders: Player[]
   ): { x: number; y: number } => {
     const isBlueTeam = defender.team === 'blue';
     const ownGoalY = isBlueTeam ? PITCH_HEIGHT - 30 : 30;
     const penaltyLineY = isBlueTeam ? PENALTY_AREA_Y_RED : PENALTY_AREA_Y_BLUE;
 
     // Tìm tiền đạo được gán kèm
-    const assignedForwardId = defenderAssignmentsRef.current.get(defender.id);
-    const assignedForward = allPlayers.find(p => p.id === assignedForwardId);
+    const assignedForwardIds = defenderAssignmentsRef.current.get(defender.id) || [];
+    const assignedForwards = allPlayers.filter(p => assignedForwardIds.includes(p.id));
 
-    // Nếu tiền đạo được gán CÓ bóng -> lùi dần về khung thành để phòng thủ
-    if (assignedForward && ballHolder && ballHolder.id === assignedForward.id) {
-      const retreatY = isBlueTeam 
-        ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
-        : Math.min(penaltyLineY + 30, 180);
-      
-      // Đứng giữa tiền đạo và khung thành
-      const blockX = clamp(assignedForward.x, 80, PITCH_WIDTH - 80);
-      
-      return {
-        x: blockX,
-        y: retreatY,
-      };
-    }
-
-    // Nếu có tiền đạo đối phương khác CÓ bóng -> các hậu vệ vẫn kèm tiền đạo của mình nhưng lui về
+    // Nếu có tiền đạo đối phương CÓ bóng
     if (ballHolder && ballHolder.team !== defender.team && ballHolder.role === 'FW') {
-      if (assignedForward) {
-        // Bám theo tiền đạo được gán nhưng lùi về hướng gôn nhà
+      // Nếu hậu vệ này được gán kèm người có bóng -> bám theo
+      if (assignedForwardIds.includes(ballHolder.id)) {
+        const retreatY = isBlueTeam 
+          ? Math.max(penaltyLineY - 30, PITCH_HEIGHT - 180)
+          : Math.min(penaltyLineY + 30, 180);
+        
+        const blockX = clamp(ballHolder.x, 80, PITCH_WIDTH - 80);
+        
+        return { x: blockX, y: retreatY };
+      }
+      
+      // Hậu vệ khác vẫn kèm tiền đạo được gán của mình
+      if (assignedForwards.length > 0) {
+        const primaryTarget = assignedForwards[0];
         const targetY = isBlueTeam 
-          ? Math.max(assignedForward.y + 30, penaltyLineY)
-          : Math.min(assignedForward.y - 30, penaltyLineY);
+          ? Math.max(primaryTarget.y + 30, penaltyLineY)
+          : Math.min(primaryTarget.y - 30, penaltyLineY);
         
         return {
-          x: clamp(assignedForward.x, 60, PITCH_WIDTH - 60),
+          x: clamp(primaryTarget.x, 60, PITCH_WIDTH - 60),
           y: targetY,
         };
       }
     }
 
     // Nếu tiền đạo đối phương KHÔNG cầm bóng -> bám theo tiền đạo được gán
-    if (assignedForward) {
-      // Đứng giữa tiền đạo và khung thành của mình, nhưng giữ khoảng cách với tiền đạo
-      const blockY = (assignedForward.y + ownGoalY) / 2;
-      let targetX = clamp(assignedForward.x, 50, PITCH_WIDTH - 50);
+    if (assignedForwards.length > 0) {
+      const primaryTarget = assignedForwards[0];
+      const blockY = (primaryTarget.y + ownGoalY) / 2;
+      let targetX = clamp(primaryTarget.x, 50, PITCH_WIDTH - 50);
       let targetY = clamp(blockY, 50, PITCH_HEIGHT - 50);
 
       // Tránh chồng lên hậu vệ khác
@@ -229,7 +279,6 @@ export const useGameLoop = () => {
         if (otherDF.id === defender.id) continue;
         const dist = distance(targetX, targetY, otherDF.x, otherDF.y);
         if (dist < MIN_DEFENDER_DISTANCE) {
-          // Đẩy ra xa
           const dx = targetX - otherDF.x;
           const dy = targetY - otherDF.y;
           const pushDist = MIN_DEFENDER_DISTANCE - dist;
@@ -242,11 +291,10 @@ export const useGameLoop = () => {
       return { x: targetX, y: targetY };
     }
 
-    // Mặc định: di chuyển nhẹ quanh vị trí
     return getIdleMovementTarget(defender, ball);
   };
 
-  // Di chuyển tiền đạo: theo bóng và hỗ trợ tấn công
+  // Di chuyển tiền đạo
   const getForwardMovement = (
     forward: Player,
     ball: { x: number; y: number },
@@ -256,14 +304,11 @@ export const useGameLoop = () => {
     const isBlueTeam = forward.team === 'blue';
     const ownHalfY = isBlueTeam ? PITCH_HEIGHT * 0.65 : PITCH_HEIGHT * 0.35;
 
-    // Nếu đội mình đang tấn công (hậu vệ hoặc tiền đạo có bóng)
     if (ballHolder && ballHolder.team === forward.team) {
-      // Dâng lên phần sân đối phương
       const targetY = isBlueTeam 
         ? Math.min(forward.y - 2, PITCH_HEIGHT * 0.25)
         : Math.max(forward.y + 2, PITCH_HEIGHT * 0.75);
       
-      // Tìm vị trí rộng để nhận bóng
       const spreadX = forward.baseX + (Math.sin(Date.now() / 1000 + forward.x) * 20);
       
       return {
@@ -272,7 +317,6 @@ export const useGameLoop = () => {
       };
     }
 
-    // Nếu đội đối phương có bóng -> lui về gần sân nhà
     if (ballHolder && ballHolder.team !== forward.team) {
       return {
         x: clamp(forward.baseX + (ball.x - PITCH_WIDTH / 2) * 0.2, 60, PITCH_WIDTH - 60),
@@ -280,7 +324,6 @@ export const useGameLoop = () => {
       };
     }
 
-    // Mặc định
     return getIdleMovementTarget(forward, ball);
   };
 
@@ -319,21 +362,17 @@ export const useGameLoop = () => {
 
       switch (prev.phase) {
         case 'kickoff_contest': {
-          // Bóng ở giữa sân, 1 tiền đạo mỗi bên tranh chấp
           const centerX = PITCH_WIDTH / 2;
           const centerY = PITCH_HEIGHT / 2;
 
-          // Chỉ 2 tiền đạo giữa (fw-0) tham gia tranh chấp
           const blueContestant = players.find(p => p.team === 'blue' && p.id.includes('fw-0'));
           const redContestant = players.find(p => p.team === 'red' && p.id.includes('fw-0'));
 
           if (!blueContestant || !redContestant) {
-            // Fallback nếu không tìm thấy
             newPhase = 'df_buildup';
             break;
           }
 
-          // Di chuyển 2 tiền đạo tranh chấp về giữa sân
           [blueContestant, redContestant].forEach(fw => {
             const idx = players.findIndex(p => p.id === fw.id);
             if (idx !== -1) {
@@ -343,7 +382,6 @@ export const useGameLoop = () => {
             }
           });
 
-          // Di chuyển các cầu thủ khác nhẹ nhàng
           players = players.map(p => {
             if (p.id === blueContestant.id || p.id === redContestant.id || p.role === 'GK') return p;
             const target = getIdleMovementTarget(p, ball);
@@ -352,12 +390,10 @@ export const useGameLoop = () => {
             return { ...p, x: newPos.x, y: newPos.y };
           });
 
-          // Kiểm tra khi cả 2 đến gần bóng
           const blueDist = distance(blueContestant.x, blueContestant.y, centerX, centerY);
           const redDist = distance(redContestant.x, redContestant.y, centerX, centerY);
 
           if (blueDist < 25 && redDist < 25) {
-            // Tranh chấp
             const bluePower = blueContestant.stats.atk + blueContestant.stats.spd;
             const redPower = redContestant.stats.atk + redContestant.stats.spd;
             
@@ -369,7 +405,6 @@ export const useGameLoop = () => {
             
             logs.push({ message: `⚡ ${winner.name} (${winningTeam.toUpperCase()}) đoạt bóng!`, type: 'action' });
             
-            // Tìm hậu vệ gần nhất để chuyền
             const teammates = players.filter(p => p.team === winningTeam && p.role === 'DF');
             const nearestDF = teammates.sort((a, b) => 
               distance(winner.x, winner.y, a.x, a.y) - distance(winner.x, winner.y, b.x, b.y)
@@ -388,7 +423,6 @@ export const useGameLoop = () => {
             }
           }
 
-          // Timeout để tránh treo
           if (prev.phaseTimer > 200) {
             const winner = Math.random() > 0.5 ? blueContestant : redContestant;
             const winningTeam = winner.team;
@@ -409,9 +443,7 @@ export const useGameLoop = () => {
         }
 
         case 'df_buildup': {
-          // Hậu vệ cầm bóng: dắt bóng lên hoặc chuyền ngang chờ tiền đạo
           if (!ballHolder || ballHolder.role !== 'DF') {
-            // Không có ball holder hợp lệ, tìm hậu vệ để giao bóng
             const df = attackingDefenders[0];
             if (df) {
               players = players.map(p => ({
@@ -427,7 +459,6 @@ export const useGameLoop = () => {
           const targetY = isBlueTeam ? PASSING_LINE_Y - 20 : PASSING_LINE_Y + 20;
           const speed = BASE_SPEED + ballHolder.stats.spd / 80;
           
-          // Dắt bóng lên
           const newPos = moveTowards(
             { x: ballHolder.x, y: ballHolder.y },
             { x: ballHolder.x, y: targetY },
@@ -438,7 +469,6 @@ export const useGameLoop = () => {
           );
           ball = { x: newPos.x, y: newPos.y, ownerId: ballHolder.id };
 
-          // Di chuyển các cầu thủ khác
           const myTeamDefenders = players.filter(p => p.team === ballHolder.team && p.role === 'DF');
           const opponentTeamDefenders = players.filter(p => p.team !== ballHolder.team && p.role === 'DF');
 
@@ -450,7 +480,6 @@ export const useGameLoop = () => {
             if (p.role === 'FW') {
               targetPos = getForwardMovement(p, ball, ballHolder, attackingTeam);
             } else {
-              // Hậu vệ
               const sameTeamDFs = p.team === ballHolder.team ? myTeamDefenders : opponentTeamDefenders;
               targetPos = getDefenderMovement(p, ball, ballHolder, players, sameTeamDFs);
             }
@@ -460,7 +489,6 @@ export const useGameLoop = () => {
             return { ...p, x: newPlayerPos.x, y: newPlayerPos.y };
           });
 
-          // Khi hậu vệ đến gần đường giữa sân và tiền đạo đã ở vị trí -> chuyền
           const distToMidline = Math.abs(ballHolder.y - PASSING_LINE_Y);
           const myForwards = players.filter(p => p.team === ballHolder.team && p.role === 'FW');
           const forwardsInPosition = myForwards.some(fw => {
@@ -485,7 +513,6 @@ export const useGameLoop = () => {
           const targetFW = forwards[Math.floor(Math.random() * forwards.length)];
           
           if (targetFW) {
-            // Tỉ lệ bị chặn bởi tiền đạo đối phương
             const interceptionChance = 0.12;
             const isIntercepted = Math.random() < interceptionChance;
             
@@ -499,7 +526,6 @@ export const useGameLoop = () => {
               }));
               ball = { x: interceptor.x, y: interceptor.y, ownerId: interceptor.id };
               
-              // Tiền đạo đoạt bóng -> chuyền về cho hậu vệ
               const interceptorTeamDFs = players.filter(p => p.team === interceptor.team && p.role === 'DF');
               const nearestDF = interceptorTeamDFs.sort((a, b) =>
                 distance(interceptor.x, interceptor.y, a.x, a.y) - distance(interceptor.x, interceptor.y, b.x, b.y)
@@ -517,6 +543,7 @@ export const useGameLoop = () => {
               newState.attackingTeam = defendingTeam;
               newPhase = 'df_buildup';
               newState.phaseTimer = 0;
+              goalBonusRef.current = 0;
               break;
             }
             
@@ -526,6 +553,7 @@ export const useGameLoop = () => {
               hasBall: p.id === targetFW.id,
             }));
             ball = { x: targetFW.x, y: targetFW.y, ownerId: targetFW.id };
+            goalBonusRef.current = 0; // Reset bonus
             newPhase = 'fw_attacking';
             newState.phaseTimer = 0;
           }
@@ -534,7 +562,6 @@ export const useGameLoop = () => {
 
         case 'fw_attacking': {
           if (!ballHolder || ballHolder.role !== 'FW') {
-            // Không có tiền đạo cầm bóng, quay lại df_buildup
             newPhase = 'df_buildup';
             break;
           }
@@ -542,7 +569,6 @@ export const useGameLoop = () => {
           const isBlueTeam = ballHolder.team === 'blue';
           const speed = BASE_SPEED + ballHolder.stats.spd / 60;
           
-          // Tiền đạo cầm bóng di chuyển về phía khung thành
           const newPos = moveTowards(
             { x: ballHolder.x, y: ballHolder.y },
             { x: PITCH_WIDTH / 2, y: goalY },
@@ -553,7 +579,6 @@ export const useGameLoop = () => {
           );
           ball = { x: newPos.x, y: newPos.y, ownerId: ballHolder.id };
 
-          // Di chuyển các cầu thủ khác
           const myTeamDefenders = players.filter(p => p.team === ballHolder.team && p.role === 'DF');
           const opponentTeamDefenders = players.filter(p => p.team !== ballHolder.team && p.role === 'DF');
 
@@ -561,7 +586,6 @@ export const useGameLoop = () => {
             if (p.hasBall || p.role === 'GK') return p;
 
             if (p.team === attackingTeam) {
-              // Đội tấn công dâng lên, hậu vệ chỉ đến nửa sân
               if (p.role === 'DF') {
                 const maxY = PASSING_LINE_Y;
                 const targetY = isBlueTeam 
@@ -571,22 +595,18 @@ export const useGameLoop = () => {
                 const newPlayerPos = moveTowards({ x: p.x, y: p.y }, { x: p.baseX, y: targetY }, moveSpeed);
                 return { ...p, x: newPlayerPos.x, y: newPlayerPos.y };
               } else {
-                // Tiền đạo hỗ trợ
                 const targetPos = getForwardMovement(p, ball, ballHolder, attackingTeam);
                 const moveSpeed = BASE_SPEED + p.stats.spd / 100;
                 const newPlayerPos = moveTowards({ x: p.x, y: p.y }, targetPos, moveSpeed);
                 return { ...p, x: newPlayerPos.x, y: newPlayerPos.y };
               }
             } else {
-              // Đội phòng ngự
               if (p.role === 'DF') {
-                // Hậu vệ bám theo tiền đạo được gán và lùi về
                 const targetPos = getDefenderMovement(p, ball, ballHolder, players, opponentTeamDefenders);
                 const moveSpeed = BASE_SPEED + p.stats.spd / 80;
                 const newPlayerPos = moveTowards({ x: p.x, y: p.y }, targetPos, moveSpeed);
                 return { ...p, x: newPlayerPos.x, y: newPlayerPos.y };
               } else {
-                // Tiền đạo đội thủ lui về
                 const targetPos = getForwardMovement(p, ball, ballHolder, attackingTeam);
                 const moveSpeed = BASE_SPEED + p.stats.spd / 100;
                 const newPlayerPos = moveTowards({ x: p.x, y: p.y }, targetPos, moveSpeed);
@@ -595,16 +615,20 @@ export const useGameLoop = () => {
             }
           });
 
-          // Kiểm tra va chạm với hậu vệ - LIÊN TỤC KIỂM TRA CƠ HỘI CƯỚP BÓNG
+          // Tính tỉ lệ cướp bóng dựa trên số lượng
+          const tackleChance = calculateTackleChance(defendingDefenders.length, attackingForwards.length);
+
+          // Kiểm tra va chạm với hậu vệ
           for (const defender of defendingDefenders) {
             const dist = distance(newPos.x, newPos.y, defender.x, defender.y);
             if (dist < TACKLE_DISTANCE) {
-              // Hậu vệ có 60% cơ hội cướp bóng khi tiếp cận tiền đạo
-              const tackleSuccess = Math.random() < DEFENDER_TACKLE_CHANCE;
+              const tackleSuccess = Math.random() < tackleChance;
               
               if (tackleSuccess) {
-                // Hậu vệ cướp bóng thành công
-                logs.push({ message: `💪 ${defender.name} cắt bóng từ ${ballHolder.name}!`, type: 'duel' });
+                logs.push({ 
+                  message: `💪 ${defender.name} cắt bóng từ ${ballHolder.name}! (${Math.round(tackleChance * 100)}%)`, 
+                  type: 'duel' 
+                });
                 
                 players = players.map(p => ({
                   ...p,
@@ -614,9 +638,42 @@ export const useGameLoop = () => {
                 newState.attackingTeam = defendingTeam;
                 newPhase = 'df_buildup';
                 newState.phaseTimer = 0;
+                goalBonusRef.current = 0;
                 break;
               } else {
-                // Tiền đạo vượt qua hậu vệ -> duel để xác định
+                // Tiền đạo có cơ hội chuyền cho đồng đội
+                const otherForwards = attackingForwards.filter(f => f.id !== ballHolder.id);
+                const shouldPass = otherForwards.length > 0 && Math.random() < 0.4;
+                
+                if (shouldPass) {
+                  const passSuccess = Math.random() < FORWARD_PASS_CHANCE;
+                  const targetTeammate = otherForwards[Math.floor(Math.random() * otherForwards.length)];
+                  
+                  if (passSuccess) {
+                    logs.push({ message: `📤 ${ballHolder.name} chuyền cho ${targetTeammate.name}!`, type: 'pass' });
+                    players = players.map(p => ({
+                      ...p,
+                      hasBall: p.id === targetTeammate.id,
+                    }));
+                    ball = { x: targetTeammate.x, y: targetTeammate.y, ownerId: targetTeammate.id };
+                    goalBonusRef.current += GOAL_BONUS_AFTER_PASS;
+                    break;
+                  } else {
+                    logs.push({ message: `❌ ${ballHolder.name} chuyền hỏng! ${defender.name} cắt bóng!`, type: 'action' });
+                    players = players.map(p => ({
+                      ...p,
+                      hasBall: p.id === defender.id,
+                    }));
+                    ball = { x: defender.x, y: defender.y, ownerId: defender.id };
+                    newState.attackingTeam = defendingTeam;
+                    newPhase = 'df_buildup';
+                    newState.phaseTimer = 0;
+                    goalBonusRef.current = 0;
+                    break;
+                  }
+                }
+                
+                // Vượt qua hậu vệ
                 newPhase = 'duel';
                 newState.phaseTimer = 0;
                 logs.push({ message: `⚔️ ${ballHolder.name} đối đầu ${defender.name}!`, type: 'duel' });
@@ -625,7 +682,6 @@ export const useGameLoop = () => {
             }
           }
 
-          // Nếu vào vùng 16m50 mà không bị chặn -> sút
           const penaltyY = isBlueTeam ? PENALTY_AREA_Y_BLUE : PENALTY_AREA_Y_RED;
           const inPenaltyArea = isBlueTeam 
             ? newPos.y < penaltyY 
@@ -696,6 +752,7 @@ export const useGameLoop = () => {
             
             newState.attackingTeam = defendingTeam;
             newPhase = 'df_buildup';
+            goalBonusRef.current = 0;
           }
           newState.phaseTimer = 0;
           break;
@@ -745,9 +802,11 @@ export const useGameLoop = () => {
           if (shooter.isSkillActive) {
             logs.push({ message: `⚡ ${shooter.name} sử dụng ${shooter.skill.emoji} ${shooter.skill.name}!`, type: 'skill' });
           }
-          logs.push({ message: `⚽ ${shooter.name} sút bóng!`, type: 'action' });
+          
+          const bonusText = goalBonusRef.current > 0 ? ` (+${Math.round(goalBonusRef.current * 100)}% bonus)` : '';
+          logs.push({ message: `⚽ ${shooter.name} sút bóng!${bonusText}`, type: 'action' });
 
-          const isGoal = attemptShot(shooter, goalkeeper);
+          const isGoal = attemptShot(shooter, goalkeeper, goalBonusRef.current);
           const isBlueTeam = shooter.team === 'blue';
 
           if (isGoal) {
@@ -757,7 +816,6 @@ export const useGameLoop = () => {
               [attackingTeam]: prev.score[attackingTeam] + 1,
             };
             
-            // Bóng bay vào lưới
             ball = { 
               x: PITCH_WIDTH / 2, 
               y: isBlueTeam ? GOAL_Y_BLUE : GOAL_Y_RED,
@@ -769,6 +827,7 @@ export const useGameLoop = () => {
             newState.showGoalOverlay = true;
             newState.lastScoringTeam = attackingTeam;
             newPhase = 'goal_celebration';
+            goalBonusRef.current = 0;
           } else {
             if (goalkeeper.isSkillActive) {
               logs.push({ message: `🧤 ${goalkeeper.name} sử dụng ${goalkeeper.skill.emoji} ${goalkeeper.skill.name}!`, type: 'skill' });
@@ -782,13 +841,13 @@ export const useGameLoop = () => {
             }));
             ball = { x: goalkeeper.x, y: goalkeeper.y, ownerId: goalkeeper.id };
             newPhase = 'save';
+            goalBonusRef.current = 0;
           }
           newState.phaseTimer = 0;
           break;
         }
 
         case 'goal_celebration': {
-          // Hiển thị overlay 2 giây rồi reset
           if (prev.phaseTimer > 60) {
             newState.showGoalOverlay = false;
             newPhase = 'reset_to_center';
@@ -798,7 +857,6 @@ export const useGameLoop = () => {
         }
 
         case 'save': {
-          // Thủ môn cầm bóng -> chuyền cho hậu vệ để bắt đầu tấn công
           const goalkeeper = players.find(p => p.hasBall && p.role === 'GK');
           
           if (!goalkeeper) {
@@ -828,15 +886,12 @@ export const useGameLoop = () => {
         }
 
         case 'reset_to_center': {
-          // Đưa cầu thủ về vị trí, bóng về giữa sân
           let allInPosition = true;
           
-          // Đội bị ghi bàn sẽ có bóng - đặt tiền đạo giữa ở giữa sân
           const concededTeam = prev.lastScoringTeam === 'blue' ? 'red' : 'blue';
-          const kickoffFW = players.find(p => p.team === concededTeam && p.id.includes('fw-1'));
+          const kickoffFW = players.find(p => p.team === concededTeam && p.id.includes('fw-0'));
 
           players = players.map(p => {
-            // Tiền đạo giữa của đội bị ghi bàn đứng giữa sân cầm bóng
             if (p.id === kickoffFW?.id) {
               const dist = distance(p.x, p.y, PITCH_WIDTH / 2, PITCH_HEIGHT / 2);
               if (dist > 10) {
@@ -857,7 +912,6 @@ export const useGameLoop = () => {
             return { ...p, hasBall: false, isDashing: false };
           });
 
-          // Cập nhật lại ball holder
           const newKickoffFW = players.find(p => p.id === kickoffFW?.id);
           if (newKickoffFW && newKickoffFW.hasBall) {
             ball = { x: newKickoffFW.x, y: newKickoffFW.y, ownerId: newKickoffFW.id, isInGoal: false };
@@ -866,7 +920,6 @@ export const useGameLoop = () => {
           }
 
           if (allInPosition || prev.phaseTimer > 80) {
-            // Tiền đạo giữa của đội bị ghi bàn chuyền cho hậu vệ
             if (kickoffFW) {
               const teammates = players.filter(p => p.team === concededTeam && p.role === 'DF');
               const nearestDF = teammates.sort((a, b) =>
@@ -883,15 +936,18 @@ export const useGameLoop = () => {
               }
             }
 
+            // Re-assign defenders after reset
+            assignDefendersToForwards(players);
+            
             newState.attackingTeam = concededTeam;
             newPhase = 'df_buildup';
             newState.phaseTimer = 0;
+            goalBonusRef.current = 0;
           }
           break;
         }
       }
 
-      // Thêm logs
       logs.forEach(log => {
         newState.matchLog = [
           { id: generateId(), time: newState.matchTime, message: log.message, type: log.type },
@@ -915,7 +971,9 @@ export const useGameLoop = () => {
     startMatch,
     stopMatch,
     selectPlayer,
-    selectedFormation,
-    setSelectedFormation,
+    blueFormation,
+    setBlueFormation,
+    redFormation,
+    setRedFormation,
   };
 };
