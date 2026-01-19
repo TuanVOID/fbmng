@@ -53,6 +53,9 @@ const initializeGame = (): GameState => {
     attackingTeam: 'blue',
     phaseTimer: 0,
     showGoalOverlay: false,
+    maxTurns: 10,
+    currentTurn: 0,
+    isMatchEnded: false,
   };
 };
 
@@ -60,6 +63,7 @@ export const useGameLoop = () => {
   const [gameState, setGameState] = useState<GameState>(() => initializeGame());
   const [blueFormation, setBlueFormation] = useState<Formation>('3-3');
   const [redFormation, setRedFormation] = useState<Formation>('3-3');
+  const [maxTurns, setMaxTurns] = useState<number>(10);
   const defenderAssignmentsRef = useRef<DefenderAssignment>(new Map());
   const goalBonusRef = useRef<number>(0); // Bonus ghi bàn từ chuyền bóng
 
@@ -161,13 +165,16 @@ export const useGameLoop = () => {
         ownerId: null,
       },
       score: { blue: 0, red: 0 },
-      matchLog: [{ id: generateId(), time: 0, message: '🏟️ Trận đấu bắt đầu! Bóng ở giữa sân!', type: 'info' }],
+      matchLog: [{ id: generateId(), time: 0, message: `🏟️ Trận đấu bắt đầu! Số turn: ${maxTurns}`, type: 'info' }],
       selectedPlayerId: null,
       isRunning: true,
       matchTime: 0,
       attackingTeam: 'blue',
       phaseTimer: 0,
       showGoalOverlay: false,
+      maxTurns: maxTurns,
+      currentTurn: 0,
+      isMatchEnded: false,
     });
   }, [blueFormation, redFormation]);
 
@@ -901,37 +908,57 @@ export const useGameLoop = () => {
           const isBlueTeam = shooter.team === 'blue';
 
           if (isGoal) {
-            logs.push({ message: `🎉 GOAL! ${shooter.name} ghi bàn cho đội ${attackingTeam.toUpperCase()}!`, type: 'goal' });
+            const newTurn = prev.currentTurn + 1;
+            logs.push({ message: `🎉 GOAL! ${shooter.name} ghi bàn cho đội ${attackingTeam.toUpperCase()}! (Turn ${newTurn}/${prev.maxTurns})`, type: 'goal' });
             newState.score = {
               ...prev.score,
               [attackingTeam]: prev.score[attackingTeam] + 1,
             };
+            newState.currentTurn = newTurn;
             
-            ball = { 
-              x: PITCH_WIDTH / 2, 
-              y: isBlueTeam ? GOAL_Y_BLUE : GOAL_Y_RED,
-              ownerId: null,
-              isInGoal: true,
-            };
-            
-            players = players.map(p => ({ ...p, hasBall: false, isDashing: false }));
-            newState.showGoalOverlay = true;
-            newState.lastScoringTeam = attackingTeam;
-            newPhase = 'goal_celebration';
+            // Kiểm tra kết thúc trận đấu
+            if (newTurn >= prev.maxTurns) {
+              logs.push({ message: `🏁 Trận đấu kết thúc sau ${prev.maxTurns} turn!`, type: 'info' });
+              newState.isMatchEnded = true;
+              newState.isRunning = false;
+              newPhase = 'idle';
+            } else {
+              ball = { 
+                x: PITCH_WIDTH / 2, 
+                y: isBlueTeam ? GOAL_Y_BLUE : GOAL_Y_RED,
+                ownerId: null,
+                isInGoal: true,
+              };
+              
+              players = players.map(p => ({ ...p, hasBall: false, isDashing: false }));
+              newState.showGoalOverlay = true;
+              newState.lastScoringTeam = attackingTeam;
+              newPhase = 'goal_celebration';
+            }
             goalBonusRef.current = 0;
           } else {
+            const newTurn = prev.currentTurn + 1;
             if (goalkeeper.isSkillActive) {
               logs.push({ message: `🧤 ${goalkeeper.name} sử dụng ${goalkeeper.skill.emoji} ${goalkeeper.skill.name}!`, type: 'skill' });
             }
-            logs.push({ message: `🧤 ${goalkeeper.name} cản phá thành công!`, type: 'action' });
+            logs.push({ message: `🧤 ${goalkeeper.name} cản phá thành công! (Turn ${newTurn}/${prev.maxTurns})`, type: 'action' });
+            newState.currentTurn = newTurn;
             
-            players = players.map(p => ({
-              ...p,
-              hasBall: p.id === goalkeeper.id,
-              isDashing: false,
-            }));
-            ball = { x: goalkeeper.x, y: goalkeeper.y, ownerId: goalkeeper.id };
-            newPhase = 'save';
+            // Kiểm tra kết thúc trận đấu
+            if (newTurn >= prev.maxTurns) {
+              logs.push({ message: `🏁 Trận đấu kết thúc sau ${prev.maxTurns} turn!`, type: 'info' });
+              newState.isMatchEnded = true;
+              newState.isRunning = false;
+              newPhase = 'idle';
+            } else {
+              players = players.map(p => ({
+                ...p,
+                hasBall: p.id === goalkeeper.id,
+                isDashing: false,
+              }));
+              ball = { x: goalkeeper.x, y: goalkeeper.y, ownerId: goalkeeper.id };
+              newPhase = 'save';
+            }
             goalBonusRef.current = 0;
           }
           newState.phaseTimer = 0;
@@ -1057,6 +1084,13 @@ export const useGameLoop = () => {
     }
   }, [gameState.isRunning, updateGame]);
 
+  const closeMatchEnd = useCallback(() => {
+    setGameState(prev => ({
+      ...prev,
+      isMatchEnded: false,
+    }));
+  }, []);
+
   return {
     gameState,
     startMatch,
@@ -1066,5 +1100,8 @@ export const useGameLoop = () => {
     setBlueFormation,
     redFormation,
     setRedFormation,
+    maxTurns,
+    setMaxTurns,
+    closeMatchEnd,
   };
 };

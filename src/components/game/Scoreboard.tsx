@@ -5,9 +5,11 @@ interface ScoreboardProps {
   redScore: number;
   matchTime: number;
   isRunning: boolean;
+  currentTurn?: number;
+  maxTurns?: number;
 }
 
-export const Scoreboard = ({ blueScore, redScore, matchTime, isRunning }: ScoreboardProps) => {
+export const Scoreboard = ({ blueScore, redScore, matchTime, isRunning, currentTurn, maxTurns }: ScoreboardProps) => {
   const formatTime = (time: number) => {
     const minutes = Math.floor(time / 1200); // 1200 ticks = 1 minute
     const seconds = Math.floor((time % 1200) / 20);
@@ -34,11 +36,16 @@ export const Scoreboard = ({ blueScore, redScore, matchTime, isRunning }: Scoreb
         </div>
       </div>
 
-      {/* Timer */}
-      <div className="px-6 py-2 bg-gray-800 rounded-lg">
+      {/* Timer & Turn Counter */}
+      <div className="px-6 py-2 bg-gray-800 rounded-lg text-center">
         <p className="text-2xl font-mono text-white font-bold">
           {formatTime(matchTime)}
         </p>
+        {currentTurn !== undefined && maxTurns !== undefined && (
+          <p className="text-xs text-gray-400 mt-1">
+            Turn: <span className="text-yellow-400 font-bold">{currentTurn}</span> / {maxTurns}
+          </p>
+        )}
         {isRunning && (
           <motion.div
             className="w-2 h-2 bg-green-500 rounded-full mx-auto mt-1"
