@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Calculator, Play, RotateCcw } from 'lucide-react';
 import { Link } from 'react-router-dom';
@@ -7,7 +7,16 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { runSimulation, SimulationConfig, SimulationResult, Formation, TeamStats } from '@/utils/matchSimulator';
+import { 
+  runSimulation, 
+  SimulationConfig, 
+  SimulationResult, 
+  Formation, 
+  TeamStats,
+  PlayerStats,
+  getFormationCounts,
+  createDefaultTeamStats
+} from '@/utils/matchSimulator';
 
 const formations: { value: Formation; label: string }[] = [
   { value: '2-4', label: '2-4 (2 DF, 4 FW)' },
@@ -24,18 +33,41 @@ const Calculate = () => {
   const [result, setResult] = useState<SimulationResult | null>(null);
   const [progress, setProgress] = useState(0);
   
-  // Custom stats
+  // Custom stats - now per-player based on formation
   const [useCustomStats, setUseCustomStats] = useState(false);
-  const [blueStats, setBlueStats] = useState<TeamStats>({
-    gkAtk: 60, gkDef: 80, gkSpd: 50,
-    dfAtk: 50, dfDef: 75, dfSpd: 60,
-    fwAtk: 80, fwDef: 50, fwSpd: 70,
-  });
-  const [redStats, setRedStats] = useState<TeamStats>({
-    gkAtk: 60, gkDef: 80, gkSpd: 50,
-    dfAtk: 50, dfDef: 75, dfSpd: 60,
-    fwAtk: 80, fwDef: 50, fwSpd: 70,
-  });
+  const [blueStats, setBlueStats] = useState<TeamStats>(createDefaultTeamStats('3-3'));
+  const [redStats, setRedStats] = useState<TeamStats>(createDefaultTeamStats('3-3'));
+
+  // Update stats when formation changes to match player count
+  useEffect(() => {
+    if (useCustomStats) {
+      setBlueStats(prev => {
+        const { defenders, forwards } = getFormationCounts(blueFormation);
+        const newDefenders = Array(defenders).fill(null).map((_, i) => 
+          prev.defenders[i] || { atk: 50, def: 75, spd: 60 }
+        );
+        const newForwards = Array(forwards).fill(null).map((_, i) => 
+          prev.forwards[i] || { atk: 80, def: 50, spd: 70 }
+        );
+        return { ...prev, defenders: newDefenders, forwards: newForwards };
+      });
+    }
+  }, [blueFormation, useCustomStats]);
+
+  useEffect(() => {
+    if (useCustomStats) {
+      setRedStats(prev => {
+        const { defenders, forwards } = getFormationCounts(redFormation);
+        const newDefenders = Array(defenders).fill(null).map((_, i) => 
+          prev.defenders[i] || { atk: 50, def: 75, spd: 60 }
+        );
+        const newForwards = Array(forwards).fill(null).map((_, i) => 
+          prev.forwards[i] || { atk: 80, def: 50, spd: 70 }
+        );
+        return { ...prev, defenders: newDefenders, forwards: newForwards };
+      });
+    }
+  }, [redFormation, useCustomStats]);
 
   const runCalculation = async () => {
     setIsRunning(true);
@@ -90,16 +122,8 @@ const Calculate = () => {
   };
 
   const resetStats = () => {
-    setBlueStats({
-      gkAtk: 60, gkDef: 80, gkSpd: 50,
-      dfAtk: 50, dfDef: 75, dfSpd: 60,
-      fwAtk: 80, fwDef: 50, fwSpd: 70,
-    });
-    setRedStats({
-      gkAtk: 60, gkDef: 80, gkSpd: 50,
-      dfAtk: 50, dfDef: 75, dfSpd: 60,
-      fwAtk: 80, fwDef: 50, fwSpd: 70,
-    });
+    setBlueStats(createDefaultTeamStats(blueFormation));
+    setRedStats(createDefaultTeamStats(redFormation));
   };
 
   const StatInput = ({ 
@@ -111,16 +135,37 @@ const Calculate = () => {
     value: number; 
     onChange: (v: number) => void 
   }) => (
-    <div className="flex items-center gap-2">
-      <Label className="w-12 text-xs text-gray-400">{label}</Label>
+    <div className="flex items-center gap-1">
+      <Label className="w-10 text-xs text-gray-400">{label}</Label>
       <Input
         type="number"
         min={40}
         max={99}
         value={value}
         onChange={(e) => onChange(Math.min(99, Math.max(40, parseInt(e.target.value) || 40)))}
-        className="w-16 h-8 text-center bg-gray-800 border-gray-600 text-white text-sm"
+        className="w-14 h-7 text-center bg-gray-800 border-gray-600 text-white text-xs px-1"
       />
+    </div>
+  );
+
+  const PlayerStatsRow = ({
+    label,
+    emoji,
+    stats,
+    onChange,
+  }: {
+    label: string;
+    emoji: string;
+    stats: PlayerStats;
+    onChange: (newStats: PlayerStats) => void;
+  }) => (
+    <div className="flex items-center gap-2 py-1 border-b border-gray-700/50 last:border-0">
+      <span className="w-20 text-xs text-gray-300">{emoji} {label}</span>
+      <div className="flex gap-1">
+        <StatInput label="ATK" value={stats.atk} onChange={v => onChange({ ...stats, atk: v })} />
+        <StatInput label="DEF" value={stats.def} onChange={v => onChange({ ...stats, def: v })} />
+        <StatInput label="SPD" value={stats.spd} onChange={v => onChange({ ...stats, spd: v })} />
+      </div>
     </div>
   );
 
@@ -128,49 +173,74 @@ const Calculate = () => {
     team, 
     stats, 
     setStats, 
-    color 
+    color,
+    formation
   }: { 
     team: string; 
     stats: TeamStats; 
     setStats: (s: TeamStats) => void; 
-    color: string 
-  }) => (
-    <Card className={`bg-gray-800/50 border-${color}-500/30`}>
-      <CardHeader className="py-3">
-        <CardTitle className={`text-lg text-${color}-400`}>{team}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-3">
-        <div>
-          <p className="text-sm text-gray-400 mb-2">🧤 Thủ môn (GK)</p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatInput label="ATK" value={stats.gkAtk} onChange={v => setStats({ ...stats, gkAtk: v })} />
-            <StatInput label="DEF" value={stats.gkDef} onChange={v => setStats({ ...stats, gkDef: v })} />
-            <StatInput label="SPD" value={stats.gkSpd} onChange={v => setStats({ ...stats, gkSpd: v })} />
+    color: string;
+    formation: Formation;
+  }) => {
+    const { defenders, forwards } = getFormationCounts(formation);
+    
+    return (
+      <Card className={`bg-gray-800/50 border-${color}-500/30`}>
+        <CardHeader className="py-2 px-3">
+          <CardTitle className={`text-sm text-${color}-400`}>{team} ({formation})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2 px-3 py-2">
+          {/* GK */}
+          <PlayerStatsRow
+            label="GK"
+            emoji="🧤"
+            stats={stats.gk}
+            onChange={(newStats) => setStats({ ...stats, gk: newStats })}
+          />
+          
+          {/* Defenders */}
+          <div className="pt-1">
+            <p className="text-xs text-gray-500 mb-1">🛡️ Hậu vệ ({defenders})</p>
+            {stats.defenders.slice(0, defenders).map((dfStats, i) => (
+              <PlayerStatsRow
+                key={`df-${i}`}
+                label={`DF ${i + 1}`}
+                emoji=""
+                stats={dfStats}
+                onChange={(newStats) => {
+                  const newDefenders = [...stats.defenders];
+                  newDefenders[i] = newStats;
+                  setStats({ ...stats, defenders: newDefenders });
+                }}
+              />
+            ))}
           </div>
-        </div>
-        <div>
-          <p className="text-sm text-gray-400 mb-2">🛡️ Hậu vệ (DF)</p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatInput label="ATK" value={stats.dfAtk} onChange={v => setStats({ ...stats, dfAtk: v })} />
-            <StatInput label="DEF" value={stats.dfDef} onChange={v => setStats({ ...stats, dfDef: v })} />
-            <StatInput label="SPD" value={stats.dfSpd} onChange={v => setStats({ ...stats, dfSpd: v })} />
+          
+          {/* Forwards */}
+          <div className="pt-1">
+            <p className="text-xs text-gray-500 mb-1">⚽ Tiền đạo ({forwards})</p>
+            {stats.forwards.slice(0, forwards).map((fwStats, i) => (
+              <PlayerStatsRow
+                key={`fw-${i}`}
+                label={`FW ${i + 1}`}
+                emoji=""
+                stats={fwStats}
+                onChange={(newStats) => {
+                  const newForwards = [...stats.forwards];
+                  newForwards[i] = newStats;
+                  setStats({ ...stats, forwards: newForwards });
+                }}
+              />
+            ))}
           </div>
-        </div>
-        <div>
-          <p className="text-sm text-gray-400 mb-2">⚽ Tiền đạo (FW)</p>
-          <div className="grid grid-cols-3 gap-2">
-            <StatInput label="ATK" value={stats.fwAtk} onChange={v => setStats({ ...stats, fwAtk: v })} />
-            <StatInput label="DEF" value={stats.fwDef} onChange={v => setStats({ ...stats, fwDef: v })} />
-            <StatInput label="SPD" value={stats.fwSpd} onChange={v => setStats({ ...stats, fwSpd: v })} />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
+        </CardContent>
+      </Card>
+    );
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-gray-800 to-gray-900 p-4">
-      <div className="max-w-5xl mx-auto">
+      <div className="max-w-6xl mx-auto">
         {/* Header */}
         <motion.div
           className="flex items-center gap-4 mb-6"
@@ -281,7 +351,7 @@ const Calculate = () => {
             <Card className="bg-gray-800/50 border-gray-700">
               <CardHeader className="py-3">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg text-gray-200">📊 Chỉ số tùy chỉnh</CardTitle>
+                  <CardTitle className="text-lg text-gray-200">📊 Chỉ số tùy chỉnh (từng cầu thủ)</CardTitle>
                   <div className="flex items-center gap-2">
                     <Button
                       variant="ghost"
@@ -295,7 +365,13 @@ const Calculate = () => {
                     <Button
                       variant={useCustomStats ? 'default' : 'outline'}
                       size="sm"
-                      onClick={() => setUseCustomStats(!useCustomStats)}
+                      onClick={() => {
+                        if (!useCustomStats) {
+                          setBlueStats(createDefaultTeamStats(blueFormation));
+                          setRedStats(createDefaultTeamStats(redFormation));
+                        }
+                        setUseCustomStats(!useCustomStats);
+                      }}
                       className={useCustomStats ? 'bg-purple-600' : 'border-gray-500'}
                     >
                       {useCustomStats ? 'ON' : 'OFF'}
@@ -305,8 +381,20 @@ const Calculate = () => {
               </CardHeader>
               {useCustomStats && (
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <TeamStatsPanel team="🔵 Team Blue" stats={blueStats} setStats={setBlueStats} color="blue" />
-                  <TeamStatsPanel team="🔴 Team Red" stats={redStats} setStats={setRedStats} color="red" />
+                  <TeamStatsPanel 
+                    team="🔵 Team Blue" 
+                    stats={blueStats} 
+                    setStats={setBlueStats} 
+                    color="blue" 
+                    formation={blueFormation}
+                  />
+                  <TeamStatsPanel 
+                    team="🔴 Team Red" 
+                    stats={redStats} 
+                    setStats={setRedStats} 
+                    color="red" 
+                    formation={redFormation}
+                  />
                 </CardContent>
               )}
             </Card>
@@ -448,7 +536,7 @@ const Calculate = () => {
                     <div className="pt-4 border-t border-gray-700 text-sm text-gray-400">
                       <p>📋 Cấu hình: Blue ({blueFormation}) vs Red ({redFormation})</p>
                       <p>🔄 {turnsPerMatch} turn/trận × {result.totalMatches.toLocaleString()} trận</p>
-                      <p>📊 Chỉ số: {useCustomStats ? 'Tùy chỉnh' : 'Ngẫu nhiên'}</p>
+                      <p>📊 Chỉ số: {useCustomStats ? 'Tùy chỉnh từng cầu thủ' : 'Ngẫu nhiên'}</p>
                     </div>
                   </div>
                 ) : (

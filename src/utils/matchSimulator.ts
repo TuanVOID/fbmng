@@ -1,5 +1,4 @@
-import { Player, PlayerRole, Team, Skill } from '@/types/game';
-import { petNames, attackSkills, defenseSkills, gkSkills } from '@/data/petNames';
+import { PlayerRole, Team } from '@/types/game';
 
 // Constants
 const PITCH_WIDTH = 400;
@@ -15,26 +14,26 @@ const GOAL_BONUS_AFTER_PASS = 0.05;
 
 export type Formation = '2-4' | '3-3' | '4-2';
 
+export interface PlayerStats {
+  atk: number;
+  def: number;
+  spd: number;
+}
+
+export interface TeamStats {
+  gk: PlayerStats;
+  defenders: PlayerStats[];
+  forwards: PlayerStats[];
+}
+
 export interface SimulationConfig {
   blueFormation: Formation;
   redFormation: Formation;
   numMatches: number;
   turnsPerMatch: number;
-  // Custom stats (optional)
+  // Custom stats (optional) - now per-player
   blueStats?: TeamStats;
   redStats?: TeamStats;
-}
-
-export interface TeamStats {
-  gkAtk: number;
-  gkDef: number;
-  gkSpd: number;
-  dfAtk: number;
-  dfDef: number;
-  dfSpd: number;
-  fwAtk: number;
-  fwDef: number;
-  fwSpd: number;
 }
 
 export interface SimulationResult {
@@ -54,14 +53,11 @@ interface SimPlayer {
   def: number;
   spd: number;
   hasBall: boolean;
-  hasSkillActive: boolean;
-  skillType: 'attack' | 'defense' | 'gk';
-  rage: number;
 }
 
 const randomStat = () => Math.floor(Math.random() * 60) + 40;
 
-const getFormationCounts = (formation: Formation): { defenders: number; forwards: number } => {
+export const getFormationCounts = (formation: Formation): { defenders: number; forwards: number } => {
   switch (formation) {
     case '2-4': return { defenders: 2, forwards: 4 };
     case '3-3': return { defenders: 3, forwards: 3 };
@@ -70,10 +66,13 @@ const getFormationCounts = (formation: Formation): { defenders: number; forwards
   }
 };
 
-const getSkillType = (role: PlayerRole): 'attack' | 'defense' | 'gk' => {
-  if (role === 'GK') return 'gk';
-  if (role === 'FW') return 'attack';
-  return 'defense';
+export const createDefaultTeamStats = (formation: Formation): TeamStats => {
+  const { defenders, forwards } = getFormationCounts(formation);
+  return {
+    gk: { atk: 60, def: 80, spd: 50 },
+    defenders: Array(defenders).fill(null).map(() => ({ atk: 50, def: 75, spd: 60 })),
+    forwards: Array(forwards).fill(null).map(() => ({ atk: 80, def: 50, spd: 70 })),
+  };
 };
 
 const createSimTeam = (team: Team, formation: Formation, customStats?: TeamStats): SimPlayer[] => {
@@ -85,44 +84,37 @@ const createSimTeam = (team: Team, formation: Formation, customStats?: TeamStats
     id: `${team}-gk`,
     role: 'GK',
     team,
-    atk: customStats?.gkAtk ?? randomStat(),
-    def: customStats?.gkDef ?? randomStat(),
-    spd: customStats?.gkSpd ?? randomStat(),
+    atk: customStats?.gk.atk ?? randomStat(),
+    def: customStats?.gk.def ?? randomStat(),
+    spd: customStats?.gk.spd ?? randomStat(),
     hasBall: false,
-    hasSkillActive: false,
-    skillType: 'gk',
-    rage: 0,
   });
 
-  // Defenders
+  // Defenders - use individual stats
   for (let i = 0; i < defenders; i++) {
+    const dfStats = customStats?.defenders[i];
     players.push({
       id: `${team}-df-${i}`,
       role: 'DF',
       team,
-      atk: customStats?.dfAtk ?? randomStat(),
-      def: customStats?.dfDef ?? randomStat(),
-      spd: customStats?.dfSpd ?? randomStat(),
+      atk: dfStats?.atk ?? randomStat(),
+      def: dfStats?.def ?? randomStat(),
+      spd: dfStats?.spd ?? randomStat(),
       hasBall: false,
-      hasSkillActive: false,
-      skillType: 'defense',
-      rage: 0,
     });
   }
 
-  // Forwards
+  // Forwards - use individual stats
   for (let i = 0; i < forwards; i++) {
+    const fwStats = customStats?.forwards[i];
     players.push({
       id: `${team}-fw-${i}`,
       role: 'FW',
       team,
-      atk: customStats?.fwAtk ?? randomStat(),
-      def: customStats?.fwDef ?? randomStat(),
-      spd: customStats?.fwSpd ?? randomStat(),
+      atk: fwStats?.atk ?? randomStat(),
+      def: fwStats?.def ?? randomStat(),
+      spd: fwStats?.spd ?? randomStat(),
       hasBall: false,
-      hasSkillActive: false,
-      skillType: 'attack',
-      rage: 0,
     });
   }
 
@@ -139,9 +131,10 @@ const calculateTackleChance = (defendingDFs: number, attackingFWs: number): numb
   return BASE_TACKLE_CHANCE;
 };
 
+// Pure stat-based duel (no rage/stamina)
 const performDuel = (attacker: SimPlayer, defender: SimPlayer): 'attacker' | 'defender' => {
-  const attackerPower = attacker.atk + (attacker.hasSkillActive && attacker.skillType === 'attack' ? 30 : 0);
-  const defenderPower = defender.def + (defender.hasSkillActive && defender.skillType === 'defense' ? 30 : 0);
+  const attackerPower = attacker.atk;
+  const defenderPower = defender.def;
   
   const attackerRoll = attackerPower + Math.random() * 40;
   const defenderRoll = defenderPower + Math.random() * 40;
@@ -149,9 +142,10 @@ const performDuel = (attacker: SimPlayer, defender: SimPlayer): 'attacker' | 'de
   return attackerRoll > defenderRoll ? 'attacker' : 'defender';
 };
 
+// Pure stat-based shot (no rage/stamina)
 const attemptShot = (shooter: SimPlayer, goalkeeper: SimPlayer, bonusChance: number = 0): boolean => {
-  const shooterPower = shooter.atk + (shooter.hasSkillActive && shooter.skillType === 'attack' ? 50 : 0);
-  const gkPower = goalkeeper.def + (goalkeeper.hasSkillActive ? 50 : 0);
+  const shooterPower = shooter.atk;
+  const gkPower = goalkeeper.def;
   
   const shooterRoll = shooterPower + Math.random() * 50 + (bonusChance * 100);
   const gkRoll = gkPower + Math.random() * 30;
@@ -165,27 +159,11 @@ const simulateTurn = (
   redPlayers: SimPlayer[],
   attackingTeam: Team
 ): { scoringTeam: Team | null; newAttackingTeam: Team } => {
-  const allPlayers = [...bluePlayers, ...redPlayers];
-  const attackers = attackingTeam === 'blue' ? bluePlayers : redPlayers;
-  const defenders = attackingTeam === 'blue' ? redPlayers : bluePlayers;
-  
-  const attackingFWs = attackers.filter(p => p.role === 'FW');
-  const attackingDFs = attackers.filter(p => p.role === 'DF');
-  const defendingDFs = defenders.filter(p => p.role === 'DF');
-  const defendingGK = defenders.find(p => p.role === 'GK')!;
-  
-  // Update rage
-  allPlayers.forEach(p => {
-    p.rage = Math.min(100, p.rage + 10);
-    p.hasSkillActive = p.rage >= 100;
-  });
-  
   let goalBonus = 0;
-  let currentAttackingTeam = attackingTeam;
   
   // Phase 1: Kickoff contest (simplified - 50/50)
   const kickoffWinner = Math.random() > 0.5 ? 'blue' : 'red';
-  currentAttackingTeam = kickoffWinner;
+  let currentAttackingTeam: Team = kickoffWinner;
   
   // Re-assign based on kickoff winner
   const currentAttackers = currentAttackingTeam === 'blue' ? bluePlayers : redPlayers;
@@ -230,12 +208,7 @@ const simulateTurn = (
         if (winner === 'defender') {
           attackSuccess = false;
           currentAttackingTeam = currentAttackingTeam === 'blue' ? 'red' : 'blue';
-          attacker.rage = 0;
-          attacker.hasSkillActive = false;
           break;
-        } else {
-          defender.rage = 0;
-          defender.hasSkillActive = false;
         }
       }
     }
@@ -250,12 +223,8 @@ const simulateTurn = (
   const isGoal = attemptShot(shooter, currentDefendingGK, goalBonus);
   
   if (isGoal) {
-    shooter.rage = 0;
-    shooter.hasSkillActive = false;
     return { scoringTeam: currentAttackingTeam, newAttackingTeam: currentAttackingTeam === 'blue' ? 'red' : 'blue' };
   } else {
-    currentDefendingGK.rage = 0;
-    currentDefendingGK.hasSkillActive = false;
     return { scoringTeam: null, newAttackingTeam: currentAttackingTeam === 'blue' ? 'red' : 'blue' };
   }
 };
