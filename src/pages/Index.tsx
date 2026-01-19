@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { Play, Square } from 'lucide-react';
+import { Play, Square, Calculator } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useGameLoop } from '@/hooks/useGameLoop';
 import { Pitch } from '@/components/game/Pitch';
@@ -81,14 +82,25 @@ const Index = () => {
           
           <div className="flex gap-3">
             {!gameState.isRunning ? (
-              <Button
-                size="lg"
-                className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-green-500/30"
-                onClick={startMatch}
-              >
-                <Play className="w-6 h-6 mr-2" />
-                Start Match
-              </Button>
+              <>
+                <Button
+                  size="lg"
+                  className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-green-500/30"
+                  onClick={startMatch}
+                >
+                  <Play className="w-6 h-6 mr-2" />
+                  Start Match
+                </Button>
+                <Link to="/calculate">
+                  <Button
+                    size="lg"
+                    className="bg-gradient-to-r from-purple-500 to-violet-600 hover:from-purple-600 hover:to-violet-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-purple-500/30"
+                  >
+                    <Calculator className="w-6 h-6 mr-2" />
+                    Calculate
+                  </Button>
+                </Link>
+              </>
             ) : (
               <Button
                 size="lg"
