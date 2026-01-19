@@ -8,6 +8,8 @@ import { PlayerStats } from '@/components/game/PlayerStats';
 import { Scoreboard } from '@/components/game/Scoreboard';
 import { GoalOverlay } from '@/components/game/GoalOverlay';
 import { FormationSelector } from '@/components/game/FormationSelector';
+import { TurnInput } from '@/components/game/TurnInput';
+import { MatchEndOverlay } from '@/components/game/MatchEndOverlay';
 
 const Index = () => {
   const { 
@@ -19,6 +21,9 @@ const Index = () => {
     setBlueFormation,
     redFormation,
     setRedFormation,
+    maxTurns,
+    setMaxTurns,
+    closeMatchEnd,
   } = useGameLoop();
   
   const selectedPlayer = gameState.players.find(p => p.id === gameState.selectedPlayerId);
@@ -50,6 +55,8 @@ const Index = () => {
             redScore={gameState.score.red}
             matchTime={gameState.matchTime}
             isRunning={gameState.isRunning}
+            currentTurn={gameState.currentTurn}
+            maxTurns={gameState.maxTurns}
           />
         </motion.div>
 
@@ -61,12 +68,15 @@ const Index = () => {
           transition={{ delay: 0.2 }}
         >
           {!gameState.isRunning && (
-            <FormationSelector
-              blueFormation={blueFormation}
-              redFormation={redFormation}
-              onSelectBlueFormation={setBlueFormation}
-              onSelectRedFormation={setRedFormation}
-            />
+            <>
+              <FormationSelector
+                blueFormation={blueFormation}
+                redFormation={redFormation}
+                onSelectBlueFormation={setBlueFormation}
+                onSelectRedFormation={setRedFormation}
+              />
+              <TurnInput value={maxTurns} onChange={setMaxTurns} />
+            </>
           )}
           
           <div className="flex gap-3">
@@ -123,6 +133,12 @@ const Index = () => {
               blueScore={gameState.score.blue}
               redScore={gameState.score.red}
               scoringTeam={gameState.lastScoringTeam}
+            />
+            <MatchEndOverlay
+              show={gameState.isMatchEnded || false}
+              blueScore={gameState.score.blue}
+              redScore={gameState.score.red}
+              onClose={closeMatchEnd}
             />
           </motion.div>
 

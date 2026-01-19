@@ -71,6 +71,9 @@ export interface GameState {
   phaseTimer: number;
   showGoalOverlay?: boolean;
   lastScoringTeam?: Team;
+  maxTurns: number;
+  currentTurn: number;
+  isMatchEnded?: boolean;
 }
 
 export interface LogEntry {
