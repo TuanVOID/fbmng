@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { Play, Square, Calculator } from 'lucide-react';
+import { Play, Square, Calculator, Film } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { useGameLoop } from '@/hooks/useGameLoop';
@@ -98,6 +98,15 @@ const Index = () => {
                   >
                     <Calculator className="w-6 h-6 mr-2" />
                     Calculate
+                  </Button>
+                </Link>
+                <Link to="/simulation">
+                  <Button
+                    size="lg"
+                    className="bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-600 hover:to-blue-700 text-white font-bold px-8 py-6 text-lg shadow-lg shadow-cyan-500/30"
+                  >
+                    <Film className="w-6 h-6 mr-2" />
+                    Simulation
                   </Button>
                 </Link>
               </>
