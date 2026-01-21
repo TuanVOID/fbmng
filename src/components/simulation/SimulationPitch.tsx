@@ -68,23 +68,30 @@ interface SimulationPlayerDotProps {
 const SimulationPlayerDot = ({ player, hasBall }: SimulationPlayerDotProps) => {
   const teamColor = player.team === 'T1' ? 'bg-blue-500' : 'bg-red-500';
   const teamShadow = player.team === 'T1' ? 'shadow-blue-500/50' : 'shadow-red-500/50';
-  const roleLabel = player.role === 'G' ? 'GK' : player.role === 'D' ? 'DF' : 'FW';
+  
+  // Format label: GK, DF1, DF2, FW1, FW2, etc.
+  const getPlayerLabel = () => {
+    if (player.role === 'G') return 'GK';
+    if (player.role === 'D') return `DF${player.index}`;
+    return `FW${player.index}`;
+  };
   
   return (
     <motion.div
       className="absolute flex flex-col items-center"
-      style={{ left: player.x, top: player.y }}
       initial={{ x: '-50%', y: '-50%' }}
       animate={{ 
+        left: player.x,
+        top: player.y,
         x: '-50%', 
         y: '-50%',
         scale: hasBall ? 1.2 : 1
       }}
-      transition={{ type: 'spring', stiffness: 200, damping: 20 }}
+      transition={{ type: 'spring', stiffness: 120, damping: 15 }}
     >
-      {/* Player dot */}
+      {/* Player dot with label inside */}
       <div className={`relative w-8 h-8 rounded-full ${teamColor} shadow-lg ${teamShadow} flex items-center justify-center`}>
-        <span className="text-[8px] font-bold text-white">{roleLabel}</span>
+        <span className="text-[7px] font-bold text-white">{getPlayerLabel()}</span>
         
         {/* Ball indicator */}
         {hasBall && (
@@ -115,9 +122,6 @@ const SimulationPlayerDot = ({ player, hasBall }: SimulationPlayerDotProps) => {
           transition={{ type: 'spring', stiffness: 100 }}
         />
       </div>
-      
-      {/* Player ID label */}
-      <span className="text-[7px] text-white/70 mt-0.5 font-mono">{player.id}</span>
     </motion.div>
   );
 };
