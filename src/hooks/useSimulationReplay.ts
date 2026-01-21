@@ -8,8 +8,21 @@ const PITCH_HEIGHT = 600;
 // Events that should be processed instantly (no delay)
 const INSTANT_EVENTS: SimEventType[] = ['decrementStamina', 'incrementRage'];
 
-// Events that require repositioning delay
-const REPOSITION_EVENTS: SimEventType[] = ['shotFailed', 'shotGoal', 'endTurn'];
+// Events that require repositioning delay (goalkeeper has ball - 3 seconds)
+const GK_REPOSITION_EVENTS: SimEventType[] = ['shotFailed', 'endTurn'];
+
+// Events that require goal celebration delay
+const GOAL_EVENTS: SimEventType[] = ['shotGoal'];
+
+// Ball action events (for ball animation)
+const BALL_ACTION_EVENTS: SimEventType[] = ['passBall', 'shotGoal', 'shotFailed', 'lostBall'];
+
+// Phase delay (2 seconds for player movement)
+const PHASE_DELAY = 2000;
+// GK reposition delay (3 seconds)
+const GK_REPOSITION_DELAY = 3000;
+// Goal celebration delay
+const GOAL_DELAY = 2500;
 
 function getBasePosition(
   team: 'T1' | 'T2',
@@ -33,8 +46,8 @@ function getBasePosition(
   if (role === 'F') {
     const count = formation.forwards;
     const spacing = PITCH_WIDTH / (count + 1);
-    // Forwards positioned in opponent's half
-    const y = isTeam1 ? PITCH_HEIGHT / 2 - 80 : PITCH_HEIGHT / 2 + 80;
+    // Forwards positioned closer to center of their own half initially
+    const y = isTeam1 ? PITCH_HEIGHT / 2 + 60 : PITCH_HEIGHT / 2 - 60;
     return { x: spacing * index, y };
   }
   
@@ -49,6 +62,7 @@ function getTacticalPosition(
 ): { x: number; y: number } {
   const isTeam1 = player.team === 'T1';
   const teamFormation = isTeam1 ? formation.t1 : formation.t2;
+  const opponentFormation = isTeam1 ? formation.t2 : formation.t1;
   const basePos = getBasePosition(player.team, player.role, player.index, teamFormation);
   
   // GK stays at goal
@@ -59,45 +73,58 @@ function getTacticalPosition(
   // Get ball owner info
   const ballOwner = ballOwnerId ? allPlayers.find(p => p.id === ballOwnerId) : null;
   const teamHasBall = ballOwner?.team === player.team;
+  const opponentHasBall = ballOwner && ballOwner.team !== player.team;
   
   if (player.role === 'F') {
-    // Forwards: stay in opponent's half when attacking
     if (teamHasBall) {
-      // Attack position - push further into opponent half
-      const attackY = isTeam1 ? 150 : PITCH_HEIGHT - 150;
+      // Attack position - push deep into opponent half
+      // Team 1 forwards go to top (y ~120-180), Team 2 forwards go to bottom (y ~420-480)
+      const attackY = isTeam1 ? 120 + (player.index * 20) : PITCH_HEIGHT - 120 - (player.index * 20);
       return { x: basePos.x, y: attackY };
     } else {
-      // Defensive position - retreat slightly
-      const defenseY = isTeam1 ? PITCH_HEIGHT / 2 - 50 : PITCH_HEIGHT / 2 + 50;
+      // Defensive position - retreat to own half near midfield
+      // Team 1 forwards stay in bottom half, Team 2 forwards stay in top half  
+      const defenseY = isTeam1 ? PITCH_HEIGHT / 2 + 80 : PITCH_HEIGHT / 2 - 80;
       return { x: basePos.x, y: defenseY };
     }
   }
   
   if (player.role === 'D') {
-    // Defenders: mark opposing forwards when defending
+    // Get opponent forwards to potentially mark
     const opponentForwards = allPlayers.filter(
       p => p.team !== player.team && p.role === 'F'
     );
     
-    if (!teamHasBall && opponentForwards.length > 0) {
-      // Find the forward this defender should mark
+    if (opponentHasBall && opponentForwards.length > 0) {
+      // Defensive mode - mark opponent forwards
+      // Calculate marking position with offset to avoid overlapping
       const dfIndex = player.index - 1; // 0-based
-      const assignedFw = opponentForwards[dfIndex % opponentForwards.length];
+      const fwCount = opponentForwards.length;
       
-      if (assignedFw) {
-        // Position between forward and own goal
-        const goalY = isTeam1 ? PITCH_HEIGHT : 0;
-        const markY = assignedFw.y + (goalY > assignedFw.y ? 30 : -30);
-        return { 
-          x: assignedFw.x, 
-          y: Math.max(80, Math.min(PITCH_HEIGHT - 80, markY))
-        };
+      // If more defenders than forwards, some will zone mark
+      if (dfIndex < fwCount) {
+        const assignedFw = opponentForwards[dfIndex];
+        if (assignedFw) {
+          // Position between forward and own goal with horizontal offset
+          const offsetX = (dfIndex % 2 === 0 ? -25 : 25); // Stagger left/right
+          const markY = isTeam1 
+            ? Math.min(assignedFw.y + 50, PITCH_HEIGHT - 100) // Stay behind the forward
+            : Math.max(assignedFw.y - 50, 100);
+          return { 
+            x: Math.max(40, Math.min(PITCH_WIDTH - 40, assignedFw.x + offsetX)), 
+            y: markY
+          };
+        }
+      } else {
+        // Extra defenders cover space
+        const zoneY = isTeam1 ? PITCH_HEIGHT - 150 : 150;
+        return { x: basePos.x, y: zoneY };
       }
     }
     
-    // When team has ball, push up to support
+    // When team has ball, push up to midfield to support
     if (teamHasBall) {
-      const supportY = isTeam1 ? PITCH_HEIGHT / 2 + 50 : PITCH_HEIGHT / 2 - 50;
+      const supportY = isTeam1 ? PITCH_HEIGHT / 2 + 20 : PITCH_HEIGHT / 2 - 20;
       return { x: basePos.x, y: supportY };
     }
     
@@ -232,9 +259,13 @@ export function useSimulationReplay() {
   const [playbackSpeed, setPlaybackSpeed] = useState(500);
   const [eventLog, setEventLog] = useState<string[]>([]);
   const [isRepositioning, setIsRepositioning] = useState(false);
+  const [ballPosition, setBallPosition] = useState<{ x: number; y: number } | null>(null);
+  const [ballTarget, setBallTarget] = useState<{ x: number; y: number } | null>(null);
+  const [isBallAnimating, setIsBallAnimating] = useState(false);
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const repositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const ballAnimationRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadMatch = useCallback((match: ParsedMatch) => {
     setParsedMatch(match);
@@ -347,6 +378,36 @@ export function useSimulationReplay() {
     return newState;
   }, []);
 
+  // Animate ball from one position to another
+  const animateBall = useCallback((fromId: string | null, toId: string, players: SimPlayer[], isShot: boolean = false) => {
+    const fromPlayer = fromId ? players.find(p => p.id === fromId) : null;
+    const toPlayer = players.find(p => p.id === toId);
+    
+    if (!toPlayer) return;
+    
+    // If it's a shot, animate to goal area
+    if (isShot) {
+      const goalY = toPlayer.team === 'T1' ? 20 : PITCH_HEIGHT - 20;
+      setBallPosition(fromPlayer ? { x: fromPlayer.x, y: fromPlayer.y } : { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
+      setBallTarget({ x: PITCH_WIDTH / 2, y: goalY });
+    } else {
+      setBallPosition(fromPlayer ? { x: fromPlayer.x, y: fromPlayer.y } : { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
+      setBallTarget({ x: toPlayer.x, y: toPlayer.y });
+    }
+    
+    setIsBallAnimating(true);
+    
+    // Clear ball animation after it completes
+    if (ballAnimationRef.current) {
+      clearTimeout(ballAnimationRef.current);
+    }
+    ballAnimationRef.current = setTimeout(() => {
+      setIsBallAnimating(false);
+      setBallPosition(null);
+      setBallTarget(null);
+    }, 600);
+  }, []);
+
   const stepForward = useCallback(() => {
     if (!parsedMatch || !matchState || eventIndex >= parsedMatch.events.length || isRepositioning) {
       if (eventIndex >= (parsedMatch?.events.length || 0)) {
@@ -360,6 +421,7 @@ export function useSimulationReplay() {
     
     // Process current event
     const event = parsedMatch.events[currentIndex];
+    const previousBallOwner = currentState.ballOwnerId;
     currentState = processEvent(event, currentState);
     currentIndex++;
     
@@ -379,14 +441,38 @@ export function useSimulationReplay() {
       setEventLog(prev => [...prev, event.raw]);
     }
     
-    // Check if we need to pause for repositioning
-    if (REPOSITION_EVENTS.includes(event.type)) {
+    // Handle ball animation for pass/shot events
+    if (event.type === 'passBall') {
+      animateBall(event.params[0], event.params[1], currentState.players);
+    } else if (event.type === 'shotGoal' || event.type === 'shotFailed') {
+      const shooterId = event.params[0];
+      const targetId = event.type === 'shotFailed' ? event.params[1] : shooterId;
+      animateBall(shooterId, targetId, currentState.players, true);
+    } else if (event.type === 'lostBall') {
+      animateBall(event.params[0], event.params[1], currentState.players);
+    }
+    
+    // Check for different delay types
+    if (GOAL_EVENTS.includes(event.type)) {
+      // Goal scored - celebration delay
       setIsRepositioning(true);
       repositionTimeoutRef.current = setTimeout(() => {
         setIsRepositioning(false);
-      }, 800);
+      }, GOAL_DELAY);
+    } else if (GK_REPOSITION_EVENTS.includes(event.type)) {
+      // GK gets ball - longer delay for all players to return to positions
+      setIsRepositioning(true);
+      repositionTimeoutRef.current = setTimeout(() => {
+        setIsRepositioning(false);
+      }, GK_REPOSITION_DELAY);
+    } else if (!INSTANT_EVENTS.includes(event.type)) {
+      // Normal phase - delay for player movement
+      setIsRepositioning(true);
+      repositionTimeoutRef.current = setTimeout(() => {
+        setIsRepositioning(false);
+      }, PHASE_DELAY);
     }
-  }, [parsedMatch, matchState, eventIndex, processEvent, isRepositioning]);
+  }, [parsedMatch, matchState, eventIndex, processEvent, isRepositioning, animateBall]);
 
   const play = useCallback(() => {
     setIsPlaying(true);
@@ -455,6 +541,15 @@ export function useSimulationReplay() {
     };
   }, []);
 
+  // Cleanup ball animation on unmount
+  useEffect(() => {
+    return () => {
+      if (ballAnimationRef.current) {
+        clearTimeout(ballAnimationRef.current);
+      }
+    };
+  }, []);
+
   return {
     parsedMatch,
     matchState,
@@ -469,6 +564,9 @@ export function useSimulationReplay() {
     reset,
     setPlaybackSpeed,
     totalEvents: parsedMatch?.events.length || 0,
-    isRepositioning
+    isRepositioning,
+    ballPosition,
+    ballTarget,
+    isBallAnimating
   };
 }

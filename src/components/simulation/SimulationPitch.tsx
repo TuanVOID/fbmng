@@ -4,9 +4,20 @@ import { SimPlayer } from '@/types/simulation';
 interface SimulationPitchProps {
   players: SimPlayer[];
   ballOwnerId: string | null;
+  ballPosition?: { x: number; y: number } | null;
+  ballTarget?: { x: number; y: number } | null;
+  isBallAnimating?: boolean;
 }
 
-export const SimulationPitch = ({ players, ballOwnerId }: SimulationPitchProps) => {
+export const SimulationPitch = ({ 
+  players, 
+  ballOwnerId,
+  ballPosition,
+  ballTarget,
+  isBallAnimating
+}: SimulationPitchProps) => {
+  const ballOwner = ballOwnerId ? players.find(p => p.id === ballOwnerId) : null;
+  
   return (
     <div className="relative w-[400px] h-[600px] bg-gradient-to-b from-green-600 to-green-700 rounded-lg overflow-hidden shadow-2xl border-4 border-white/20">
       {/* Pitch markings */}
@@ -34,26 +45,58 @@ export const SimulationPitch = ({ players, ballOwnerId }: SimulationPitchProps) 
         <SimulationPlayerDot 
           key={player.id} 
           player={player} 
-          hasBall={player.id === ballOwnerId}
+          hasBall={player.id === ballOwnerId && !isBallAnimating}
         />
       ))}
       
-      {/* Ball indicator (when someone has it) */}
-      {ballOwnerId && (
+      {/* Animated ball during pass/shot */}
+      {isBallAnimating && ballPosition && ballTarget && (
         <motion.div
-          className="absolute pointer-events-none"
+          className="absolute w-4 h-4 bg-gradient-to-br from-white to-gray-200 rounded-full pointer-events-none z-20"
           style={{
-            left: players.find(p => p.id === ballOwnerId)?.x || 200,
-            top: players.find(p => p.id === ballOwnerId)?.y || 300,
+            boxShadow: '0 0 15px rgba(255,255,255,0.9), 0 2px 6px rgba(0,0,0,0.4)',
           }}
-          animate={{
+          initial={{
+            left: ballPosition.x,
+            top: ballPosition.y,
             x: '-50%',
             y: '-50%',
-            scale: [1, 1.2, 1],
+            scale: 1,
           }}
-          transition={{ duration: 0.5, repeat: Infinity }}
+          animate={{
+            left: ballTarget.x,
+            top: ballTarget.y,
+            x: '-50%',
+            y: '-50%',
+            scale: [1, 1.3, 1],
+          }}
+          transition={{
+            duration: 0.5,
+            ease: 'easeOut',
+          }}
+        />
+      )}
+      
+      {/* Static ball on player when not animating */}
+      {!isBallAnimating && ballOwner && (
+        <motion.div
+          className="absolute pointer-events-none z-10"
+          animate={{
+            left: ballOwner.x,
+            top: ballOwner.y - 20,
+            x: '-50%',
+            y: '-50%',
+          }}
+          transition={{ type: 'spring', stiffness: 120, damping: 15 }}
         >
-          <div className="w-3 h-3 bg-white rounded-full shadow-lg shadow-white/50 -mt-8" />
+          <motion.div 
+            className="w-4 h-4 bg-gradient-to-br from-white to-gray-200 rounded-full"
+            style={{
+              boxShadow: '0 0 10px rgba(255,255,255,0.8), 0 2px 4px rgba(0,0,0,0.3)',
+            }}
+            animate={{ scale: [1, 1.1, 1] }}
+            transition={{ duration: 1, repeat: Infinity }}
+          />
         </motion.div>
       )}
     </div>
