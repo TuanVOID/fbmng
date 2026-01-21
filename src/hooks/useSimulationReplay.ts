@@ -355,47 +355,38 @@ export function useSimulationReplay() {
       return;
     }
 
-    const event = parsedMatch.events[eventIndex];
-    const newState = processEvent(event, matchState);
-    setMatchState(newState);
+    let currentIndex = eventIndex;
+    let currentState = matchState;
+    
+    // Process current event
+    const event = parsedMatch.events[currentIndex];
+    currentState = processEvent(event, currentState);
+    currentIndex++;
+    
+    // Skip ahead through any instant events (stamina/rage changes)
+    while (currentIndex < parsedMatch.events.length) {
+      const nextEvent = parsedMatch.events[currentIndex];
+      if (!INSTANT_EVENTS.includes(nextEvent.type)) break;
+      currentState = processEvent(nextEvent, currentState);
+      currentIndex++;
+    }
+    
+    setMatchState(currentState);
+    setEventIndex(currentIndex);
     
     // Only log non-instant events
     if (!INSTANT_EVENTS.includes(event.type)) {
       setEventLog(prev => [...prev, event.raw]);
     }
     
-    setEventIndex(prev => prev + 1);
-    
     // Check if we need to pause for repositioning
     if (REPOSITION_EVENTS.includes(event.type)) {
       setIsRepositioning(true);
       repositionTimeoutRef.current = setTimeout(() => {
         setIsRepositioning(false);
-      }, 800); // Allow time for players to animate to new positions
+      }, 800);
     }
   }, [parsedMatch, matchState, eventIndex, processEvent, isRepositioning]);
-
-  // Process instant events immediately without delay
-  useEffect(() => {
-    if (!isPlaying || !parsedMatch || !matchState || isRepositioning) return;
-    
-    let currentIndex = eventIndex;
-    let currentState = matchState;
-    
-    // Process all consecutive instant events immediately
-    while (currentIndex < parsedMatch.events.length) {
-      const nextEvent = parsedMatch.events[currentIndex];
-      if (!INSTANT_EVENTS.includes(nextEvent.type)) break;
-      
-      currentState = processEvent(nextEvent, currentState);
-      currentIndex++;
-    }
-    
-    if (currentIndex !== eventIndex) {
-      setMatchState(currentState);
-      setEventIndex(currentIndex);
-    }
-  }, [isPlaying, parsedMatch, matchState, eventIndex, processEvent, isRepositioning]);
 
   const play = useCallback(() => {
     setIsPlaying(true);
