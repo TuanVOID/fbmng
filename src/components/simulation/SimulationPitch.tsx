@@ -122,48 +122,57 @@ const SimulationPlayerDot = ({ player, hasBall }: SimulationPlayerDotProps) => {
   return (
     <motion.div
       className="absolute flex flex-col items-center"
-      initial={{ x: '-50%', y: '-50%' }}
-      animate={{ 
-        left: player.x,
-        top: player.y,
-        x: '-50%', 
-        y: '-50%',
-        scale: hasBall ? 1.2 : 1
+      style={{
+        left: 0,
+        top: 0,
       }}
-      transition={{ type: 'spring', stiffness: 120, damping: 15 }}
+      initial={false}
+      animate={{ 
+        x: player.x,
+        y: player.y,
+        scale: hasBall ? 1.15 : 1
+      }}
+      transition={{ 
+        type: 'tween',
+        duration: 1.5,
+        ease: 'easeInOut'
+      }}
     >
-      {/* Player dot with label inside */}
-      <div className={`relative w-8 h-8 rounded-full ${teamColor} shadow-lg ${teamShadow} flex items-center justify-center`}>
-        <span className="text-[7px] font-bold text-white">{getPlayerLabel()}</span>
+      {/* Centering wrapper */}
+      <div className="flex flex-col items-center" style={{ transform: 'translate(-50%, -50%)' }}>
+        {/* Player dot with label inside */}
+        <div className={`relative w-8 h-8 rounded-full ${teamColor} shadow-lg ${teamShadow} flex items-center justify-center`}>
+          <span className="text-[7px] font-bold text-white">{getPlayerLabel()}</span>
+          
+          {/* Ball indicator on player */}
+          {hasBall && (
+            <motion.div
+              className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full shadow-lg"
+              animate={{ scale: [1, 1.3, 1] }}
+              transition={{ duration: 0.5, repeat: Infinity }}
+            />
+          )}
+        </div>
         
-        {/* Ball indicator */}
-        {hasBall && (
+        {/* Stamina bar */}
+        <div className="mt-1 w-10 h-1.5 bg-gray-800 rounded-full overflow-hidden">
           <motion.div
-            className="absolute -top-1 -right-1 w-3 h-3 bg-white rounded-full shadow-lg"
-            animate={{ scale: [1, 1.3, 1] }}
-            transition={{ duration: 0.5, repeat: Infinity }}
+            className="h-full bg-yellow-400"
+            initial={false}
+            animate={{ width: `${player.stamina}%` }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
           />
-        )}
-      </div>
-      
-      {/* Stamina bar */}
-      <div className="mt-1 w-10 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-        <motion.div
-          className="h-full bg-yellow-400"
-          initial={{ width: '100%' }}
-          animate={{ width: `${player.stamina}%` }}
-          transition={{ type: 'spring', stiffness: 100 }}
-        />
-      </div>
-      
-      {/* Rage bar */}
-      <div className="mt-0.5 w-10 h-1.5 bg-gray-800 rounded-full overflow-hidden">
-        <motion.div
-          className="h-full bg-orange-500"
-          initial={{ width: '0%' }}
-          animate={{ width: `${player.rage}%` }}
-          transition={{ type: 'spring', stiffness: 100 }}
-        />
+        </div>
+        
+        {/* Rage bar */}
+        <div className="mt-0.5 w-10 h-1.5 bg-gray-800 rounded-full overflow-hidden">
+          <motion.div
+            className="h-full bg-orange-500"
+            initial={false}
+            animate={{ width: `${player.rage}%` }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+          />
+        </div>
       </div>
     </motion.div>
   );
