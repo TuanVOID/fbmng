@@ -1,11 +1,17 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { SimEvent, SimPlayer, SimMatchState, ParsedMatch } from '@/types/simulation';
-import { parseFormation, parsePlayerId, parseStaminaRage } from '@/utils/simulationParser';
+import { SimEvent, SimPlayer, SimMatchState, ParsedMatch, SimEventType } from '@/types/simulation';
+import { parseFormation, parseStaminaRage } from '@/utils/simulationParser';
 
 const PITCH_WIDTH = 400;
 const PITCH_HEIGHT = 600;
 
-function getPlayerPosition(
+// Events that should be processed instantly (no delay)
+const INSTANT_EVENTS: SimEventType[] = ['decrementStamina', 'incrementRage'];
+
+// Events that require repositioning delay
+const REPOSITION_EVENTS: SimEventType[] = ['shotFailed', 'shotGoal', 'endTurn'];
+
+function getBasePosition(
   team: 'T1' | 'T2',
   role: 'G' | 'D' | 'F',
   index: number,
@@ -27,11 +33,78 @@ function getPlayerPosition(
   if (role === 'F') {
     const count = formation.forwards;
     const spacing = PITCH_WIDTH / (count + 1);
-    const y = isTeam1 ? PITCH_HEIGHT / 2 + 80 : PITCH_HEIGHT / 2 - 80;
+    // Forwards positioned in opponent's half
+    const y = isTeam1 ? PITCH_HEIGHT / 2 - 80 : PITCH_HEIGHT / 2 + 80;
     return { x: spacing * index, y };
   }
   
   return { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 };
+}
+
+function getTacticalPosition(
+  player: SimPlayer,
+  allPlayers: SimPlayer[],
+  ballOwnerId: string | null,
+  formation: { t1: { defenders: number; forwards: number }; t2: { defenders: number; forwards: number } }
+): { x: number; y: number } {
+  const isTeam1 = player.team === 'T1';
+  const teamFormation = isTeam1 ? formation.t1 : formation.t2;
+  const basePos = getBasePosition(player.team, player.role, player.index, teamFormation);
+  
+  // GK stays at goal
+  if (player.role === 'G') {
+    return basePos;
+  }
+  
+  // Get ball owner info
+  const ballOwner = ballOwnerId ? allPlayers.find(p => p.id === ballOwnerId) : null;
+  const teamHasBall = ballOwner?.team === player.team;
+  
+  if (player.role === 'F') {
+    // Forwards: stay in opponent's half when attacking
+    if (teamHasBall) {
+      // Attack position - push further into opponent half
+      const attackY = isTeam1 ? 150 : PITCH_HEIGHT - 150;
+      return { x: basePos.x, y: attackY };
+    } else {
+      // Defensive position - retreat slightly
+      const defenseY = isTeam1 ? PITCH_HEIGHT / 2 - 50 : PITCH_HEIGHT / 2 + 50;
+      return { x: basePos.x, y: defenseY };
+    }
+  }
+  
+  if (player.role === 'D') {
+    // Defenders: mark opposing forwards when defending
+    const opponentForwards = allPlayers.filter(
+      p => p.team !== player.team && p.role === 'F'
+    );
+    
+    if (!teamHasBall && opponentForwards.length > 0) {
+      // Find the forward this defender should mark
+      const dfIndex = player.index - 1; // 0-based
+      const assignedFw = opponentForwards[dfIndex % opponentForwards.length];
+      
+      if (assignedFw) {
+        // Position between forward and own goal
+        const goalY = isTeam1 ? PITCH_HEIGHT : 0;
+        const markY = assignedFw.y + (goalY > assignedFw.y ? 30 : -30);
+        return { 
+          x: assignedFw.x, 
+          y: Math.max(80, Math.min(PITCH_HEIGHT - 80, markY))
+        };
+      }
+    }
+    
+    // When team has ball, push up to support
+    if (teamHasBall) {
+      const supportY = isTeam1 ? PITCH_HEIGHT / 2 + 50 : PITCH_HEIGHT / 2 - 50;
+      return { x: basePos.x, y: supportY };
+    }
+    
+    return basePos;
+  }
+  
+  return basePos;
 }
 
 function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[] {
@@ -40,7 +113,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   const f2 = parseFormation(formation.t2);
   
   // Team 1 (bottom - blue)
-  const gk1Pos = getPlayerPosition('T1', 'G', 0, f1);
+  const gk1Pos = getBasePosition('T1', 'G', 0, f1);
   players.push({
     id: 'T1-G',
     team: 'T1',
@@ -55,7 +128,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   });
   
   for (let i = 1; i <= f1.defenders; i++) {
-    const pos = getPlayerPosition('T1', 'D', i, f1);
+    const pos = getBasePosition('T1', 'D', i, f1);
     players.push({
       id: `T1-D${i}`,
       team: 'T1',
@@ -71,7 +144,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   }
   
   for (let i = 1; i <= f1.forwards; i++) {
-    const pos = getPlayerPosition('T1', 'F', i, f1);
+    const pos = getBasePosition('T1', 'F', i, f1);
     players.push({
       id: `T1-F${i}`,
       team: 'T1',
@@ -87,7 +160,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   }
   
   // Team 2 (top - red)
-  const gk2Pos = getPlayerPosition('T2', 'G', 0, f2);
+  const gk2Pos = getBasePosition('T2', 'G', 0, f2);
   players.push({
     id: 'T2-G',
     team: 'T2',
@@ -102,7 +175,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   });
   
   for (let i = 1; i <= f2.defenders; i++) {
-    const pos = getPlayerPosition('T2', 'D', i, f2);
+    const pos = getBasePosition('T2', 'D', i, f2);
     players.push({
       id: `T2-D${i}`,
       team: 'T2',
@@ -118,7 +191,7 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   }
   
   for (let i = 1; i <= f2.forwards; i++) {
-    const pos = getPlayerPosition('T2', 'F', i, f2);
+    const pos = getBasePosition('T2', 'F', i, f2);
     players.push({
       id: `T2-F${i}`,
       team: 'T2',
@@ -136,21 +209,39 @@ function createInitialPlayers(formation: { t1: string; t2: string }): SimPlayer[
   return players;
 }
 
+function updatePlayerPositions(
+  players: SimPlayer[],
+  ballOwnerId: string | null,
+  formation: { t1: string; t2: string }
+): SimPlayer[] {
+  const f1 = parseFormation(formation.t1);
+  const f2 = parseFormation(formation.t2);
+  const formationData = { t1: f1, t2: f2 };
+  
+  return players.map(player => {
+    const tacticalPos = getTacticalPosition(player, players, ballOwnerId, formationData);
+    return { ...player, x: tacticalPos.x, y: tacticalPos.y };
+  });
+}
+
 export function useSimulationReplay() {
   const [parsedMatch, setParsedMatch] = useState<ParsedMatch | null>(null);
   const [matchState, setMatchState] = useState<SimMatchState | null>(null);
   const [eventIndex, setEventIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playbackSpeed, setPlaybackSpeed] = useState(500); // ms per event
+  const [playbackSpeed, setPlaybackSpeed] = useState(500);
   const [eventLog, setEventLog] = useState<string[]>([]);
+  const [isRepositioning, setIsRepositioning] = useState(false);
   
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const repositionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const loadMatch = useCallback((match: ParsedMatch) => {
     setParsedMatch(match);
     setEventIndex(0);
     setIsPlaying(false);
     setEventLog([]);
+    setIsRepositioning(false);
     
     const players = createInitialPlayers(match.formation);
     setMatchState({
@@ -199,37 +290,33 @@ export function useSimulationReplay() {
         break;
         
       case 'passBall':
-        giveBall(event.params[1]); // receiver gets ball
+        giveBall(event.params[1]);
         break;
         
       case 'lostBall':
-        giveBall(event.params[1]); // stealer gets ball
+        giveBall(event.params[1]);
         break;
         
       case 'shotGoal':
-        // Scorer's team gets a point
         const scorerId = event.params[0];
         const scorer = findPlayer(scorerId);
         if (scorer?.team === 'T1') {
-          newState.score.t2++; // T1 attacks T2's goal
+          newState.score.t2++;
         } else if (scorer?.team === 'T2') {
-          newState.score.t1++; // T2 attacks T1's goal
+          newState.score.t1++;
         }
         clearBall();
         break;
         
       case 'shotFailed':
-        // GK saves, GK gets ball
         giveBall(event.params[1]);
         break;
         
       case 'fwDfDuelSuccess':
-        // Forward wins, keeps ball
         giveBall(event.params[0]);
         break;
         
       case 'fwDfDuelFailed':
-        // Defender wins, gets ball
         giveBall(event.params[1]);
         break;
         
@@ -252,21 +339,63 @@ export function useSimulationReplay() {
       }
     }
     
+    // Update tactical positions after ball ownership changes
+    if (['wonKickoff', 'passBall', 'lostBall', 'shotFailed', 'fwDfDuelSuccess', 'fwDfDuelFailed'].includes(event.type)) {
+      newState.players = updatePlayerPositions(newState.players, newState.ballOwnerId, newState.formation);
+    }
+    
     return newState;
   }, []);
 
   const stepForward = useCallback(() => {
-    if (!parsedMatch || !matchState || eventIndex >= parsedMatch.events.length) {
-      setIsPlaying(false);
+    if (!parsedMatch || !matchState || eventIndex >= parsedMatch.events.length || isRepositioning) {
+      if (eventIndex >= (parsedMatch?.events.length || 0)) {
+        setIsPlaying(false);
+      }
       return;
     }
 
     const event = parsedMatch.events[eventIndex];
     const newState = processEvent(event, matchState);
     setMatchState(newState);
-    setEventLog(prev => [...prev, event.raw]);
+    
+    // Only log non-instant events
+    if (!INSTANT_EVENTS.includes(event.type)) {
+      setEventLog(prev => [...prev, event.raw]);
+    }
+    
     setEventIndex(prev => prev + 1);
-  }, [parsedMatch, matchState, eventIndex, processEvent]);
+    
+    // Check if we need to pause for repositioning
+    if (REPOSITION_EVENTS.includes(event.type)) {
+      setIsRepositioning(true);
+      repositionTimeoutRef.current = setTimeout(() => {
+        setIsRepositioning(false);
+      }, 800); // Allow time for players to animate to new positions
+    }
+  }, [parsedMatch, matchState, eventIndex, processEvent, isRepositioning]);
+
+  // Process instant events immediately without delay
+  useEffect(() => {
+    if (!isPlaying || !parsedMatch || !matchState || isRepositioning) return;
+    
+    let currentIndex = eventIndex;
+    let currentState = matchState;
+    
+    // Process all consecutive instant events immediately
+    while (currentIndex < parsedMatch.events.length) {
+      const nextEvent = parsedMatch.events[currentIndex];
+      if (!INSTANT_EVENTS.includes(nextEvent.type)) break;
+      
+      currentState = processEvent(nextEvent, currentState);
+      currentIndex++;
+    }
+    
+    if (currentIndex !== eventIndex) {
+      setMatchState(currentState);
+      setEventIndex(currentIndex);
+    }
+  }, [isPlaying, parsedMatch, matchState, eventIndex, processEvent, isRepositioning]);
 
   const play = useCallback(() => {
     setIsPlaying(true);
@@ -281,6 +410,11 @@ export function useSimulationReplay() {
     setIsPlaying(false);
     setEventIndex(0);
     setEventLog([]);
+    setIsRepositioning(false);
+    
+    if (repositionTimeoutRef.current) {
+      clearTimeout(repositionTimeoutRef.current);
+    }
     
     const players = createInitialPlayers(parsedMatch.formation);
     setMatchState({
@@ -296,7 +430,7 @@ export function useSimulationReplay() {
 
   // Auto-play interval
   useEffect(() => {
-    if (isPlaying) {
+    if (isPlaying && !isRepositioning) {
       intervalRef.current = setInterval(() => {
         stepForward();
       }, playbackSpeed);
@@ -312,7 +446,7 @@ export function useSimulationReplay() {
         clearInterval(intervalRef.current);
       }
     };
-  }, [isPlaying, playbackSpeed, stepForward]);
+  }, [isPlaying, playbackSpeed, stepForward, isRepositioning]);
 
   // Stop when match ends
   useEffect(() => {
@@ -320,6 +454,15 @@ export function useSimulationReplay() {
       setIsPlaying(false);
     }
   }, [matchState?.isEnded, parsedMatch, eventIndex]);
+
+  // Cleanup
+  useEffect(() => {
+    return () => {
+      if (repositionTimeoutRef.current) {
+        clearTimeout(repositionTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return {
     parsedMatch,
@@ -334,6 +477,7 @@ export function useSimulationReplay() {
     stepForward,
     reset,
     setPlaybackSpeed,
-    totalEvents: parsedMatch?.events.length || 0
+    totalEvents: parsedMatch?.events.length || 0,
+    isRepositioning
   };
 }
