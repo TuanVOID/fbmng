@@ -379,20 +379,39 @@ export function useSimulationReplay() {
   }, []);
 
   // Animate ball from one position to another
-  const animateBall = useCallback((fromId: string | null, toId: string, players: SimPlayer[], isShot: boolean = false) => {
-    const fromPlayer = fromId ? players.find(p => p.id === fromId) : null;
-    const toPlayer = players.find(p => p.id === toId);
+  // prevPlayers = player positions BEFORE processing event
+  // currentPlayers = player positions AFTER processing event (for tackle dash effect)
+  const animateBall = useCallback((
+    fromId: string | null, 
+    toId: string, 
+    prevPlayers: SimPlayer[], 
+    type: 'pass' | 'shot' | 'steal'
+  ) => {
+    const fromPlayer = fromId ? prevPlayers.find(p => p.id === fromId) : null;
+    const toPlayer = prevPlayers.find(p => p.id === toId);
     
-    if (!toPlayer) return;
+    if (!fromPlayer && type !== 'shot') return;
     
-    // If it's a shot, animate to goal area
-    if (isShot) {
-      const goalY = toPlayer.team === 'T1' ? 20 : PITCH_HEIGHT - 20;
+    if (type === 'shot') {
+      // Shot: ball goes from shooter to opponent goal
+      const shooterTeam = fromPlayer?.team;
+      const goalY = shooterTeam === 'T1' ? 20 : PITCH_HEIGHT - 20;
       setBallPosition(fromPlayer ? { x: fromPlayer.x, y: fromPlayer.y } : { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
       setBallTarget({ x: PITCH_WIDTH / 2, y: goalY });
+    } else if (type === 'steal') {
+      // Steal (tackle): ball stays at attacker position, defender rushes to that position
+      // We show ball moving from attacker to attacker's position (the defender intercepts)
+      if (fromPlayer) {
+        setBallPosition({ x: fromPlayer.x, y: fromPlayer.y });
+        // Ball stays at the same position (defender comes to steal)
+        setBallTarget({ x: fromPlayer.x, y: fromPlayer.y });
+      }
     } else {
-      setBallPosition(fromPlayer ? { x: fromPlayer.x, y: fromPlayer.y } : { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
-      setBallTarget({ x: toPlayer.x, y: toPlayer.y });
+      // Pass: ball moves from passer to receiver
+      if (fromPlayer && toPlayer) {
+        setBallPosition({ x: fromPlayer.x, y: fromPlayer.y });
+        setBallTarget({ x: toPlayer.x, y: toPlayer.y });
+      }
     }
     
     setIsBallAnimating(true);
@@ -419,9 +438,11 @@ export function useSimulationReplay() {
     let currentIndex = eventIndex;
     let currentState = matchState;
     
+    // Store player positions BEFORE processing the event (for ball animation)
+    const prevPlayers = currentState.players.map(p => ({ ...p }));
+    
     // Process current event
     const event = parsedMatch.events[currentIndex];
-    const previousBallOwner = currentState.ballOwnerId;
     currentState = processEvent(event, currentState);
     currentIndex++;
     
@@ -441,15 +462,20 @@ export function useSimulationReplay() {
       setEventLog(prev => [...prev, event.raw]);
     }
     
-    // Handle ball animation for pass/shot events
+    // Handle ball animation for pass/shot/steal events
+    // Use prevPlayers (positions BEFORE event) for correct animation start position
     if (event.type === 'passBall') {
-      animateBall(event.params[0], event.params[1], currentState.players);
+      // Pass: from passer to receiver
+      animateBall(event.params[0], event.params[1], prevPlayers, 'pass');
     } else if (event.type === 'shotGoal' || event.type === 'shotFailed') {
-      const shooterId = event.params[0];
-      const targetId = event.type === 'shotFailed' ? event.params[1] : shooterId;
-      animateBall(shooterId, targetId, currentState.players, true);
-    } else if (event.type === 'lostBall') {
-      animateBall(event.params[0], event.params[1], currentState.players);
+      // Shot: from shooter to goal
+      animateBall(event.params[0], event.params[0], prevPlayers, 'shot');
+    } else if (event.type === 'lostBall' || event.type === 'fwDfDuelFailed') {
+      // Steal: defender intercepts ball from attacker
+      animateBall(event.params[0], event.params[1], prevPlayers, 'steal');
+    } else if (event.type === 'wonKickoff') {
+      // Kickoff: ball appears at player
+      animateBall(null, event.params[0], prevPlayers, 'pass');
     }
     
     // Check for different delay types
