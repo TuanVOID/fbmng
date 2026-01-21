@@ -27,7 +27,10 @@ const Simulation = () => {
     stepForward,
     reset,
     setPlaybackSpeed,
-    totalEvents
+    totalEvents,
+    ballPosition,
+    ballTarget,
+    isBallAnimating
   } = useSimulationReplay();
 
   const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -235,7 +238,10 @@ const Simulation = () => {
             {matchState ? (
               <SimulationPitch 
                 players={matchState.players} 
-                ballOwnerId={matchState.ballOwnerId} 
+                ballOwnerId={matchState.ballOwnerId}
+                ballPosition={ballPosition}
+                ballTarget={ballTarget}
+                isBallAnimating={isBallAnimating}
               />
             ) : (
               <div className="w-[400px] h-[600px] bg-gray-800/50 rounded-lg border-2 border-dashed border-gray-700 flex items-center justify-center">
